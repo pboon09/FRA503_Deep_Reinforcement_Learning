@@ -32,7 +32,8 @@ If a list of installed packages appears, then the installation was successful! �
 
 ## Part 2: Isaac Sim Installation
 
-**Check you CUDA Version**
+**Check your CUDA Version**
+
 ```bash
 nvidia-smi
 ```
@@ -42,26 +43,31 @@ nvidia-smi
 Please refer to the official installation guide [[link](https://isaac-sim.github.io/IsaacLab/v2.1.0/source/setup/installation/pip_installation.html)]
 
 **Create Conda Environment**
+
 ```bash
 conda create -n env_isaaclab python=3.10 -y
 conda activate env_isaaclab
 ```
 
 **Install PyTorch if you're using CUDA 11**
+
 ```bash
 pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu118
 ```
 
 **Install PyTorch if you're using CUDA 12**
+
 ```bash
 pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu121
 ```
 
 **Install Isaac Sim 4.5.0**
+
 ```bash
 pip install --upgrade pip
 pip install 'isaacsim[all,extscache]==4.5.0' --extra-index-url https://pypi.nvidia.com
 ```
+
 ---
 
 ### Option B: Isaac Sim 5.1.0 using Isaac Lab Latest Version
@@ -69,17 +75,20 @@ pip install 'isaacsim[all,extscache]==4.5.0' --extra-index-url https://pypi.nvid
 Please refer to the official installation guide [[link](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/pip_installation.html)]
 
 **Create Conda Environment**
+
 ```bash
 conda create -n env_isaaclab python=3.11 -y
 conda activate env_isaaclab
 ```
 
 **Install PyTorch if you're using CUDA 12**
+
 ```bash
 pip install -U torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128
 ```
 
 **Install Isaac Sim 5.1.0**
+
 ```bash
 pip install --upgrade pip
 pip install "isaacsim[all,extscache]==5.1.0" --extra-index-url https://pypi.nvidia.com
@@ -93,7 +102,7 @@ pip install "isaacsim[all,extscache]==5.1.0" --extra-index-url https://pypi.nvid
 isaacsim
 ```
 
-- Take a lot of time here, so be patient!
+- Takes a long time on first run, so be patient!
 - Type `Yes` to accept EULA
 
 If the simulator window opens, then the installation was successful! 🎉
@@ -103,22 +112,20 @@ If the simulator window opens, then the installation was successful! 🎉
 ## Part 3: Isaac Lab Installation
 
 ### Option A: Isaac Lab 2.1.0
+
 ```bash
 cd ~
 git clone -b release/2.1.0 https://github.com/isaac-sim/IsaacLab.git
 cd IsaacLab
 ```
 
----
-
 ### Option B: Isaac Lab Latest Version
+
 ```bash
 cd ~
 git clone https://github.com/isaac-sim/IsaacLab.git
 cd IsaacLab
 ```
-
----
 
 ### Install Dependencies
 
@@ -166,23 +173,80 @@ nvidia-smi
 python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA: {torch.version.cuda}'); print(f'GPU: {torch.cuda.is_available()}')"
 ```
 
-### Run Isaac Lab
+---
+
+## Part 5: Test Training
+
+### Activate Environment
 
 ```bash
 cd ~/IsaacLab
 conda activate env_isaaclab
+```
 
-# Run tutorial
-./isaaclab.sh -p scripts/tutorials/00_sim/create_empty.py
+### Train Robot 
+Remove `--headless` to open GUI (headless for faster training)
 
-# Train robot (headless for faster training)
+```bash
+# Ant
 ./isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/train.py --task=Isaac-Ant-v0 --headless
 
-# List available tasks
+# Robot dog
+./isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/train.py --task=Isaac-Velocity-Rough-Anymal-C-v0 --headless
+
+# Humanoid
+./isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/train.py --task=Isaac-Humanoid-v0 --headless
+
+# Cartpole
+./isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/train.py --task=Isaac-Cartpole-v0 --headless
+```
+
+### Play Trained Policy
+```bash
+./isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/play.py --task=Isaac-Ant-v0
+
+./isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/play.py --task=Isaac-Velocity-Rough-Anymal-C-v0
+
+./isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/play.py --task=Isaac-Humanoid-v0
+
+./isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/play.py --task=Isaac-Cartpole-v0
+```
+
+### View Training Results
+
+```bash
+# Check trained model location
+ls logs/rsl_rl/ant/
+ls logs/rsl_rl/anymal_c_rough/
+ls logs/rsl_rl/humanoid/
+ls logs/rsl_rl/cartpole/
+
+# View the latest training folder
+ls -la logs/rsl_rl/ant/$(ls -t logs/rsl_rl/ant/ | head -1)/
+```
+
+### Delete Training Results
+
+```bash
+# Delete specific training run
+rm -rf logs/rsl_rl/ant/
+rm -rf logs/rsl_rl/anymal_c_rough/
+rm -rf logs/rsl_rl/humanoid/
+rm -rf logs/rsl_rl/cartpole/
+
+# Delete all training logs
+rm -rf logs/
+```
+
+### List Available Tasks
+
+```bash
 python scripts/environments/list_envs.py
 ```
 
 ---
+
+## Troubleshooting
 
 ### Remove and Recreate Environment
 
@@ -209,3 +273,17 @@ nvidia-smi
 sudo apt install neofetch
 neofetch
 ```
+
+---
+
+## A* Star ARTC Machine Spec
+
+| Component | Spec |
+|-----------|------|
+| **OS** | Ubuntu 24.04.3 LTS |
+| **CPU** | Intel Core Ultra 9 285K (24 cores) @ 4.1GHz |
+| **RAM** | 128 GB |
+| **GPU** | NVIDIA RTX PRO 6000 Blackwell |
+| **VRAM** | 96 GB |
+| **CUDA** | 13.0 |
+| **Architecture** | sm_120 (Blackwell) |
