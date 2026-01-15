@@ -32,7 +32,12 @@ If a list of installed packages appears, then the installation was successful! ð
 
 ## Part 2: Isaac Sim Installation
 
-### Option A: Isaac Sim 4.5.0 + Isaac Lab 2.1.0
+**Check you CUDA Version**
+```bash
+nvidia-smi
+```
+
+### Option A: Isaac Sim 4.5.0 using Isaac Lab 2.1.0
 
 Please refer to the official installation guide [[link](https://isaac-sim.github.io/IsaacLab/v2.1.0/source/setup/installation/pip_installation.html)]
 
@@ -52,14 +57,14 @@ pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorc
 pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu121
 ```
 
-**Install Isaac Sim 4.5.0:**
+**Install Isaac Sim 4.5.0**
 ```bash
 pip install --upgrade pip
 pip install 'isaacsim[all,extscache]==4.5.0' --extra-index-url https://pypi.nvidia.com
 ```
 ---
 
-### Option B: Isaac Sim 5.1.0 + Isaac Lab main
+### Option B: Isaac Sim 5.1.0 using Isaac Lab Latest Version
 
 Please refer to the official installation guide [[link](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/pip_installation.html)]
 
@@ -74,11 +79,13 @@ conda activate env_isaaclab
 pip install -U torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128
 ```
 
-**Install Isaac Sim 5.1.0:**
+**Install Isaac Sim 5.1.0**
 ```bash
 pip install --upgrade pip
 pip install "isaacsim[all,extscache]==5.1.0" --extra-index-url https://pypi.nvidia.com
 ```
+
+---
 
 ### Verifying Isaac Sim Installation
 
@@ -104,7 +111,7 @@ cd IsaacLab
 
 ---
 
-### Option B: Latest Version (Isaac Lab main)
+### Option B: Isaac Lab Latest Version
 ```bash
 cd ~
 git clone https://github.com/isaac-sim/IsaacLab.git
