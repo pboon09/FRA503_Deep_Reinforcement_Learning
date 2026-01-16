@@ -35,7 +35,11 @@ If a list of installed packages appears, then the installation was successful! ð
 **Check your CUDA Version**
 
 ```bash
+# Driver Max Support
 nvidia-smi
+
+# Installed CUDA Toolkit
+nvcc --version
 ```
 
 ### Option A: Isaac Sim 4.5.0 using Isaac Lab 2.1.0
