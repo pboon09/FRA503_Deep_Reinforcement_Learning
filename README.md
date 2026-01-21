@@ -146,7 +146,7 @@ sudo apt install cmake build-essential
 ### Verifying Isaac Lab Installation
 
 ```bash
-./isaaclab.sh -p scripts/tutorials/00_sim/create_empty.py
+python scripts/tutorials/00_sim/create_empty.py
 ```
 
 If you see a black viewport window, then the installation was successful! 🎉
@@ -188,55 +188,61 @@ cd ~/IsaacLab
 conda activate env_isaaclab
 ```
 
-### Train Robot 
+### Train Robot
 Remove `--headless` to open GUI (headless for faster training)
 
 ```bash
 # Ant
-./isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/train.py --task=Isaac-Ant-v0 --headless
+python scripts/reinforcement_learning/sb3/train.py --task=Isaac-Ant-v0 --num_envs 64 --headless
 
 # Robot dog
-./isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/train.py --task=Isaac-Velocity-Rough-Anymal-C-v0 --headless
+python scripts/reinforcement_learning/sb3/train.py --task=Isaac-Velocity-Rough-Anymal-C-v0 --num_envs 64 --headless
 
 # Humanoid
-./isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/train.py --task=Isaac-Humanoid-v0 --headless
+python scripts/reinforcement_learning/sb3/train.py --task=Isaac-Humanoid-v0 --num_envs 64 --headless
 
 # Cartpole
-./isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/train.py --task=Isaac-Cartpole-v0 --headless
+python scripts/reinforcement_learning/sb3/train.py --task=Isaac-Cartpole-v0 --num_envs 64 --headless
 ```
 
 ### Play Trained Policy
 ```bash
-./isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/play.py --task=Isaac-Ant-v0
+python scripts/reinforcement_learning/sb3/play.py --task=Isaac-Ant-v0 --num_envs 64
 
-./isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/play.py --task=Isaac-Velocity-Rough-Anymal-C-v0
+python scripts/reinforcement_learning/sb3/play.py --task=Isaac-Velocity-Rough-Anymal-C-v0 --num_envs 64
 
-./isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/play.py --task=Isaac-Humanoid-v0
+python scripts/reinforcement_learning/sb3/play.py --task=Isaac-Humanoid-v0 --num_envs 64
 
-./isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/play.py --task=Isaac-Cartpole-v0
+python scripts/reinforcement_learning/sb3/play.py --task=Isaac-Cartpole-v0 --num_envs 64
 ```
 
 ### View Training Results
 
 ```bash
 # Check trained model location
-ls logs/rsl_rl/ant/
-ls logs/rsl_rl/anymal_c_rough/
-ls logs/rsl_rl/humanoid/
-ls logs/rsl_rl/cartpole/
+ls logs/sb3/Isaac-Ant-v0/
+ls logs/sb3/Isaac-Velocity-Rough-Anymal-C-v0/
+ls logs/sb3/Isaac-Humanoid-v0/
+ls logs/sb3/Isaac-Cartpole-v0/
 
 # View the latest training folder
-ls -la logs/rsl_rl/ant/$(ls -t logs/rsl_rl/ant/ | head -1)/
+ls -la logs/sb3/Isaac-Cartpole-v0/$(ls -t logs/sb3/Isaac-Cartpole-v0/ | head -1)/
+```
+
+### Visualize Training with TensorBoard
+
+```bash
+python -m tensorboard.main --logdir logs/sb3/Isaac-Cartpole-v0/
 ```
 
 ### Delete Training Results
 
 ```bash
 # Delete specific training run
-rm -rf logs/rsl_rl/ant/
-rm -rf logs/rsl_rl/anymal_c_rough/
-rm -rf logs/rsl_rl/humanoid/
-rm -rf logs/rsl_rl/cartpole/
+rm -rf logs/sb3/Isaac-Ant-v0/
+rm -rf logs/sb3/Isaac-Velocity-Rough-Anymal-C-v0/
+rm -rf logs/sb3/Isaac-Humanoid-v0/
+rm -rf logs/sb3/Isaac-Cartpole-v0/
 
 # Delete all training logs
 rm -rf logs/
