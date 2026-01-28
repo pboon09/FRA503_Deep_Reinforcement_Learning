@@ -120,3 +120,171 @@ def plot_combined_optimal_actions(
     if save_path:
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close()
+
+
+def plot_action_counts(
+    action_counts: np.ndarray,
+    optimal_arm: int,
+    title: str = "Action Counts per Arm",
+    save_path: Optional[str] = None,
+):
+    n_arms = len(action_counts)
+    x = np.arange(1, n_arms + 1)
+
+    colors = ['tab:blue'] * n_arms
+    colors[optimal_arm] = 'tab:green'
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.bar(x, action_counts, color=colors, alpha=0.8)
+
+    ax.set_xlabel("Arm")
+    ax.set_ylabel("Times Selected")
+    ax.set_title(title, fontweight="bold")
+    ax.set_xticks(x)
+    ax.grid(True, alpha=0.3, axis="y")
+
+    from matplotlib.patches import Patch
+    legend_elements = [Patch(facecolor='tab:green', label='Optimal Arm'),
+                       Patch(facecolor='tab:blue', label='Other Arms')]
+    ax.legend(handles=legend_elements, loc='upper right')
+
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def plot_cumulative_regret(
+    regret_data: Dict[str, np.ndarray],
+    title: str = "Cumulative Regret Over Time",
+    save_path: Optional[str] = None,
+):
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    for name, regret in regret_data.items():
+        ax.plot(regret, label=name)
+
+    ax.set_xlabel("Steps")
+    ax.set_ylabel("Cumulative Regret")
+    ax.set_title(title, fontweight="bold")
+    ax.legend(loc="upper left", framealpha=0.9)
+    ax.grid(True, alpha=0.3)
+
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def plot_q_error(
+    q_error: np.ndarray,
+    title: str = "Q Estimation Error Over Time",
+    save_path: Optional[str] = None,
+):
+    """Plot mean absolute error between Q estimates and true means over time."""
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    ax.plot(q_error, color="tab:purple", linewidth=1.5)
+
+    ax.set_xlabel("Steps")
+    ax.set_ylabel("Mean Absolute Error")
+    ax.set_title(title, fontweight="bold")
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim(bottom=0)
+
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def plot_combined_q_error(
+    q_error_data: Dict[str, np.ndarray],
+    title: str = "Q Estimation Error Comparison",
+    save_path: Optional[str] = None,
+):
+    """Plot Q estimation error comparison across algorithms."""
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    for name, q_error in q_error_data.items():
+        ax.plot(q_error, label=name)
+
+    ax.set_xlabel("Steps")
+    ax.set_ylabel("Mean Absolute Error")
+    ax.set_title(title, fontweight="bold")
+    ax.legend(loc="upper right", framealpha=0.9)
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim(bottom=0)
+
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def plot_grouped_comparison(
+    reward_data: Dict[str, np.ndarray],
+    optimal_data: Dict[str, np.ndarray],
+    group_name: str,
+    save_path: Optional[str] = None,
+):
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    for name, rewards in reward_data.items():
+        axes[0].plot(rewards, label=name)
+    axes[0].set_xlabel("Steps")
+    axes[0].set_ylabel("Average Reward")
+    axes[0].set_title(f"{group_name}: Average Reward", fontweight="bold")
+    axes[0].legend(loc="lower right", framealpha=0.9, fontsize=8)
+    axes[0].grid(True, alpha=0.3)
+
+    for name, optimal in optimal_data.items():
+        axes[1].plot(optimal, label=name)
+    axes[1].set_xlabel("Steps")
+    axes[1].set_ylabel("% Optimal Action")
+    axes[1].set_title(f"{group_name}: Optimal Action %", fontweight="bold")
+    axes[1].legend(loc="lower right", framealpha=0.9, fontsize=8)
+    axes[1].grid(True, alpha=0.3)
+    axes[1].set_ylim(0, 100)
+
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def plot_best_overlay(
+    reward_data: Dict[str, np.ndarray],
+    optimal_data: Dict[str, np.ndarray],
+    regret_data: Dict[str, np.ndarray],
+    save_path: Optional[str] = None,
+):
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+
+    colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red']
+
+    for i, (name, rewards) in enumerate(reward_data.items()):
+        axes[0].plot(rewards, label=name, color=colors[i % len(colors)], linewidth=2)
+    axes[0].set_xlabel("Steps")
+    axes[0].set_ylabel("Average Reward")
+    axes[0].set_title("Best of Each Group: Reward", fontweight="bold")
+    axes[0].legend(loc="lower right", framealpha=0.9)
+    axes[0].grid(True, alpha=0.3)
+
+    for i, (name, optimal) in enumerate(optimal_data.items()):
+        axes[1].plot(optimal, label=name, color=colors[i % len(colors)], linewidth=2)
+    axes[1].set_xlabel("Steps")
+    axes[1].set_ylabel("% Optimal Action")
+    axes[1].set_title("Best of Each Group: Optimal %", fontweight="bold")
+    axes[1].legend(loc="lower right", framealpha=0.9)
+    axes[1].grid(True, alpha=0.3)
+    axes[1].set_ylim(0, 100)
+
+    for i, (name, regret) in enumerate(regret_data.items()):
+        axes[2].plot(regret, label=name, color=colors[i % len(colors)], linewidth=2)
+    axes[2].set_xlabel("Steps")
+    axes[2].set_ylabel("Cumulative Regret")
+    axes[2].set_title("Best of Each Group: Regret", fontweight="bold")
+    axes[2].legend(loc="upper left", framealpha=0.9)
+    axes[2].grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()

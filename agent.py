@@ -1,12 +1,12 @@
 import numpy as np
-from typing import Literal
+from typing import Literal, Callable, Union
 
 
 class Agent:
     def __init__(
         self,
         n_arms: int,
-        epsilon: float = 0.1,
+        epsilon: Union[float, Callable[[int, float], float]] = 0.1,
         c: float = 2.0,
         strategy: Literal["epsilon_greedy", "ucb"] = "epsilon_greedy",
         initial_q: float = 0.0,
@@ -22,6 +22,7 @@ class Agent:
         self.q_estimates = np.full(n_arms, initial_q, dtype=float)
         self.action_counts = np.zeros(n_arms, dtype=int)
         self.total_steps = 0
+        self.cumulative_reward = 0.0
 
     def select_action(self) -> int:
         if self.strategy == "epsilon_greedy":
@@ -31,8 +32,14 @@ class Agent:
         else:
             raise ValueError(f"Unknown strategy: {self.strategy}")
 
+    def get_epsilon(self) -> float:
+        if callable(self.epsilon):
+            return self.epsilon(self.total_steps, self.cumulative_reward)
+        return self.epsilon
+
     def _epsilon_greedy_action(self) -> int:
-        if np.random.random() < self.epsilon:
+        current_epsilon = self.get_epsilon()
+        if np.random.random() < current_epsilon:
             return np.random.randint(self.n_arms)
         else:
             max_q = np.max(self.q_estimates)
@@ -56,6 +63,7 @@ class Agent:
     def update(self, action: int, reward: float):
         self.action_counts[action] += 1
         self.total_steps += 1
+        self.cumulative_reward += reward
 
         if self.alpha is not None:
             self.q_estimates[action] += self.alpha * (reward - self.q_estimates[action])
@@ -67,6 +75,7 @@ class Agent:
         self.q_estimates = np.full(self.n_arms, self.initial_q, dtype=float)
         self.action_counts = np.zeros(self.n_arms, dtype=int)
         self.total_steps = 0
+        self.cumulative_reward = 0.0
 
     def get_greedy_action(self) -> int:
         return int(np.argmax(self.q_estimates))
