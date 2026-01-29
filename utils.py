@@ -37,6 +37,61 @@ def plot_q_comparison(
     plt.close()
 
 
+def plot_q_comparison_boxplot(
+    true_means: np.ndarray,
+    q_estimates: np.ndarray,
+    n_samples: int = 500,
+    title: str = "Reward Distribution with Q-Estimates",
+    save_path: Optional[str] = None,
+):
+    n_arms = len(true_means)
+    x = np.arange(1, n_arms + 1)
+
+    # Generate reward samples for each arm: rewards ~ N(true_mean, 1)
+    reward_samples = []
+    for mean in true_means:
+        samples = np.random.normal(mean, 1.0, n_samples)
+        reward_samples.append(samples)
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    # Box plot of reward distributions
+    bp = ax.boxplot(reward_samples, positions=x, widths=0.6, patch_artist=True,
+                    boxprops=dict(facecolor='lightgray', alpha=0.7),
+                    medianprops=dict(color='black', linewidth=1.5),
+                    whiskerprops=dict(color='gray'),
+                    capprops=dict(color='gray'),
+                    flierprops=dict(marker='o', markerfacecolor='gray', markersize=3, alpha=0.5))
+
+    # Overlay true means (red diamond)
+    ax.scatter(x, true_means, color='tab:red', marker='D', s=100, zorder=5,
+               label='True Mean (q*)', edgecolors='black', linewidths=0.5)
+
+    # Overlay Q estimates (blue circle)
+    ax.scatter(x, q_estimates, color='tab:blue', marker='o', s=100, zorder=5,
+               label='Learned Q', edgecolors='black', linewidths=0.5)
+
+    ax.axhline(y=0, color="gray", linestyle="--", linewidth=1, alpha=0.7)
+
+    ax.set_xlabel("Arm")
+    ax.set_ylabel("Value")
+    ax.set_title(title, fontweight="bold")
+    ax.set_xticks(x)
+    ax.legend(loc="best", framealpha=0.9)
+    ax.grid(True, alpha=0.3, axis="y")
+
+    # Set y limits based on data
+    all_samples = np.concatenate(reward_samples)
+    y_min = min(all_samples.min(), min(q_estimates))
+    y_max = max(all_samples.max(), max(q_estimates))
+    margin = (y_max - y_min) * 0.1
+    ax.set_ylim(y_min - margin, y_max + margin)
+
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
 def plot_reward_distribution(
     bandit,
     n_samples: int = 1000,
