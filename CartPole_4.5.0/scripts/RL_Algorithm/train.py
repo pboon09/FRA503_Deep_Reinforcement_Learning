@@ -57,6 +57,7 @@ import gymnasium as gym
 import torch
 from datetime import datetime
 import random
+from torch.utils.tensorboard import SummaryWriter
 
 from isaaclab.envs import (
     DirectMARLEnv,
@@ -224,6 +225,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             row[f"q_{i}"] = float(q)
         csv_writer.writerow(row)
 
+    # ---- TensorBoard setup ----
+    tb_dir = os.path.join("logs", task_name, Algorithm_name,
+                          f"tensorboard_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}")
+    os.makedirs(tb_dir, exist_ok=True)
+    tb_writer = SummaryWriter(log_dir=tb_dir)
+    print(f"[TensorBoard] tensorboard --logdir {tb_dir}")
+
     # ---- Q-value save directory ----
     q_save_dir = os.path.join("q_value", task_name, Algorithm_name)
     os.makedirs(q_save_dir, exist_ok=True)
@@ -235,8 +243,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # ---- Per-env state tracking ----
     episode_rewards = np.zeros(num_envs)   # cumulative reward for each env's current episode
+    episode_steps   = np.zeros(num_envs, dtype=int)  # steps in current episode per env
     total_episodes  = 0                    # total completed episodes across all envs
     sum_reward      = 0.0                  # accumulates episode returns for periodic printing
+    sum_ep_length   = 0.0                  # accumulates episode lengths for periodic logging
     last_log_ep     = 0                    # last episode count when we printed/saved
     global_step     = 0
 
@@ -314,6 +324,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                     done_i = bool(done_flags[i].item())
 
                     episode_rewards[i] += r_i
+                    episode_steps[i]   += 1
+
+                    # Capture return before match/case may reset it (for TB logging)
+                    ep_return_snapshot = float(episode_rewards[i])
+                    ep_steps_snapshot  = int(episode_steps[i])
 
                     match Algorithm_name:
 
@@ -380,6 +395,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                                 total_episodes += 1
                                 ep_completed_this_step += 1
 
+                    # TensorBoard: log once per completed episode (all envs)
+                    if done_i:
+                        tb_writer.add_scalar("episode/reward",  ep_return_snapshot, total_episodes)
+                        tb_writer.add_scalar("episode/length",  ep_steps_snapshot,  total_episodes)
+                        tb_writer.add_scalar("episode/epsilon", agent.epsilon,       total_episodes)
+                        sum_ep_length += ep_steps_snapshot
+                        episode_steps[i] = 0
+
                     # Log only env 0 every step to keep CSV size manageable
                     if i == 0:
                         log_step(total_episodes, global_step, obs_i,
@@ -391,10 +414,21 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
                 # ---- Periodic print and Q-value save (every 100 completed episodes) ----
                 if total_episodes - last_log_ep >= 100 and total_episodes > 0:
-                    n_new = total_episodes - last_log_ep
-                    avg   = sum_reward / n_new
-                    print(f"\n[Episode {total_episodes}] avg_score: {avg:.2f}  epsilon: {agent.epsilon:.4f}")
+                    n_new    = total_episodes - last_log_ep
+                    avg      = sum_reward / n_new
+                    avg_len  = sum_ep_length / n_new
+                    print(f"\n[Episode {total_episodes}] avg_score: {avg:.2f}  avg_len: {avg_len:.0f}  epsilon: {agent.epsilon:.4f}")
+
+                    # TensorBoard: periodic averages
+                    tb_writer.add_scalar("train/avg_episode_reward", avg,      total_episodes)
+                    tb_writer.add_scalar("train/avg_episode_length", avg_len,  total_episodes)
+                    tb_writer.add_scalar("train/epsilon",            agent.epsilon, total_episodes)
+                    if agent.training_error:
+                        mean_err = float(np.mean(agent.training_error[-1000:]))
+                        tb_writer.add_scalar("train/mean_td_error", mean_err, total_episodes)
+
                     sum_reward  = 0.0
+                    sum_ep_length = 0.0
                     last_log_ep = total_episodes
 
                     q_value_file = (
@@ -413,8 +447,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             pbar.close()
 
         csv_file.close()
+        tb_writer.close()
         print("!!! Training is complete !!!")
-        print(f"CSV log saved to: {csv_filename}")
+        print(f"CSV log saved to:  {csv_filename}")
+        print(f"TensorBoard logs:  {tb_dir}")
+        print(f"  → run: tensorboard --logdir {tb_dir}")
         break
 
     # ==================================================================== #
