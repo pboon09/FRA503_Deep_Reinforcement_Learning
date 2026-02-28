@@ -194,7 +194,7 @@ def save_state_trajectory(out_dir: str, label: str, df: pd.DataFrame):
     sub = df.iloc[::step]
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
-    fig.suptitle(f"State Trajectory (env 0) — {label}", fontsize=12)
+    fig.suptitle(f"State Trajectory — {label}", fontsize=12)
 
     ax1.plot(sub["step"], sub["pole_angle"], linewidth=0.6, color="tab:orange")
     ax1.axhline(0, color="k", linewidth=0.8, linestyle="--", alpha=0.5)
@@ -230,7 +230,7 @@ def save_phase_portrait(out_dir: str, label: str, df: pd.DataFrame):
     cb.set_label("Action Value (force)")
     ax.axhline(0, color="k", linewidth=0.5, alpha=0.4)
     ax.axvline(0, color="k", linewidth=0.5, alpha=0.4)
-    ax.set_title(f"Phase Portrait (pole_angle vs pole_vel) — {label}")
+    ax.set_title(f"Phase Portrait — {label}")
     ax.set_xlabel("Pole Angle (rad)")
     ax.set_ylabel("Pole Angular Velocity (rad/s)")
     ax.grid(True, alpha=0.3)
@@ -257,7 +257,7 @@ def save_reward_curve(out_dir: str, datasets, window: int):
     for i, (label, df) in enumerate(datasets):
         s = rolling_mean(df["reward"], window)
         ax.plot(df["step"], s, label=label, linewidth=1.2, color=_color(i))
-    ax.set_title(f"Reward per Step — rolling mean (window={window})")
+    ax.set_title("Reward per Step")
     ax.set_xlabel("Global Step")
     ax.set_ylabel("Reward")
     ax.legend()
@@ -277,7 +277,7 @@ def save_episode_reward(out_dir: str, datasets, window: int):
         ep = episode_blocks(df)
         s = rolling_mean(ep["sum_reward"], smooth_w)
         ax.plot(ep.index, s, label=label, linewidth=1.2, color=_color(i))
-    ax.set_title(f"Episode Total Reward — rolling mean (window={smooth_w} episodes)")
+    ax.set_title("Episode Total Reward")
     ax.set_xlabel("Episode Block")
     ax.set_ylabel("Total Reward")
     ax.legend()
@@ -296,7 +296,7 @@ def save_episode_length(out_dir: str, datasets, window: int):
         ep = episode_blocks(df)
         s = rolling_mean(ep["steps"], smooth_w)
         ax.plot(ep.index, s, label=label, linewidth=1.2, color=_color(i))
-    ax.set_title(f"Episode Length — rolling mean (window={smooth_w} episodes)")
+    ax.set_title("Episode Length")
     ax.set_xlabel("Episode Block")
     ax.set_ylabel("Steps")
     ax.legend()
@@ -350,7 +350,7 @@ def save_max_q(out_dir: str, datasets, window: int):
         max_q = df[q_cols].max(axis=1)
         ax.plot(df["step"], rolling_mean(max_q, window),
                 label=label, linewidth=1.2, color=_color(i))
-    ax.set_title(f"Max Q-value Over Time — rolling mean (window={window})")
+    ax.set_title("Max Q-value")
     ax.set_xlabel("Global Step")
     ax.set_ylabel("Max Q-value")
     ax.legend()
@@ -372,8 +372,7 @@ def save_q_spread(out_dir: str, datasets, window: int):
         spread = df[q_cols].max(axis=1) - df[q_cols].min(axis=1)
         ax.plot(df["step"], rolling_mean(spread, window),
                 label=label, linewidth=1.2, color=_color(i))
-    ax.set_title(f"Q-value Spread (max−min) — rolling mean (window={window})\n"
-                 "Higher spread → agent distinguishes good vs bad actions")
+    ax.set_title("Q-value Spread (max − min)")
     ax.set_xlabel("Global Step")
     ax.set_ylabel("Q-value Spread")
     ax.legend()
@@ -395,8 +394,7 @@ def save_td_error(out_dir: str, datasets, window: int):
         step_idx = df["step"].iloc[td.index]
         ax.plot(step_idx, rolling_mean(td, window),
                 label=label, linewidth=1.2, color=_color(i))
-    ax.set_title(f"Approx. TD Error — rolling mean (window={window})\n"
-                 "|r + γ·maxQ(s') − Q(s,a)|  →  should decay toward 0 as Q converges")
+    ax.set_title("TD Error")
     ax.set_xlabel("Global Step")
     ax.set_ylabel("TD Error")
     ax.legend()
@@ -416,8 +414,7 @@ def save_pole_variance(out_dir: str, datasets, window: int):
         ep = episode_blocks(df)
         s = rolling_mean(ep["var_pole_angle"].fillna(0), smooth_w)
         ax.plot(ep.index, s, label=label, linewidth=1.2, color=_color(i))
-    ax.set_title(f"Pole Angle Variance per Episode — rolling mean (window={smooth_w})\n"
-                 "Lower = more stable balance (agent keeping pole upright)")
+    ax.set_title("Pole Angle Variance per Episode")
     ax.set_xlabel("Episode Block")
     ax.set_ylabel("Variance of Pole Angle (rad²)")
     ax.legend()
@@ -436,8 +433,7 @@ def save_action_entropy(out_dir: str, datasets):
         ent = action_entropy_per_block(df)
         ax.plot(ent.index, rolling_mean(ent, max(1, len(ent) // 100)),
                 label=label, linewidth=1.2, color=_color(i))
-    ax.set_title("Action Entropy per Episode\n"
-                 "High = uniform (exploring), Low = peaked (agent committed to a policy)")
+    ax.set_title("Action Entropy per Episode")
     ax.set_xlabel("Episode Block")
     ax.set_ylabel("Entropy (nats)")
     ax.legend()
@@ -463,8 +459,7 @@ def save_state_coverage(out_dir: str, datasets):
             cumulative.append(len(seen))
         ax.plot(df["step"].values, cumulative,
                 label=label, linewidth=1.2, color=_color(i))
-    ax.set_title("Cumulative Unique States Visited\n"
-                 "Flattening = Q-table coverage saturating (all reachable states seen)")
+    ax.set_title("Cumulative Unique States Visited")
     ax.set_xlabel("Global Step")
     ax.set_ylabel("Unique States")
     ax.legend()

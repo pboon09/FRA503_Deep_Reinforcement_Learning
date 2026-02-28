@@ -52,6 +52,7 @@ simulation_app = app_launcher.app
 """Rest everything follows."""
 
 import csv
+import time
 import numpy as np
 import gymnasium as gym
 import torch
@@ -242,13 +243,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     num_envs = args_cli.num_envs if args_cli.num_envs is not None else 1
 
     # ---- Per-env state tracking ----
-    episode_rewards = np.zeros(num_envs)   # cumulative reward for each env's current episode
-    episode_steps   = np.zeros(num_envs, dtype=int)  # steps in current episode per env
-    total_episodes  = 0                    # total completed episodes across all envs
-    sum_reward      = 0.0                  # accumulates episode returns for periodic printing
-    sum_ep_length   = 0.0                  # accumulates episode lengths for periodic logging
-    last_log_ep     = 0                    # last episode count when we printed/saved
-    global_step     = 0
+    episode_rewards  = np.zeros(num_envs)       # cumulative reward for each env's current episode
+    episode_steps    = np.zeros(num_envs, dtype=int)  # steps in current episode per env
+    total_episodes   = 0                         # total completed episodes across all envs
+    sum_reward       = 0.0                       # accumulates episode returns for periodic print
+    sum_ep_length    = 0.0                       # accumulates episode lengths for periodic log
+    last_log_ep      = 0                         # last episode count when we printed/saved
+    global_step      = 0
+    train_start_time = time.time()               # for FPS calculation
+    recent_actions   = []                        # env-0 action_idx buffer for entropy estimate
 
     # MC: per-env episode histories (agent's single-list histories won't work for multi-env)
     if Algorithm_name == "MC":
@@ -395,11 +398,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                                 total_episodes += 1
                                 ep_completed_this_step += 1
 
-                    # TensorBoard: log once per completed episode (all envs)
+                    # TensorBoard: log once per completed episode (x-axis = global_step)
                     if done_i:
-                        tb_writer.add_scalar("episode/reward",  ep_return_snapshot, total_episodes)
-                        tb_writer.add_scalar("episode/length",  ep_steps_snapshot,  total_episodes)
-                        tb_writer.add_scalar("episode/epsilon", agent.epsilon,       total_episodes)
+                        tb_writer.add_scalar("Episode/reward",  ep_return_snapshot, global_step)
+                        tb_writer.add_scalar("Episode/length",  ep_steps_snapshot,  global_step)
+                        tb_writer.add_scalar("Episode/epsilon", agent.epsilon,       global_step)
                         sum_ep_length += ep_steps_snapshot
                         episode_steps[i] = 0
 
@@ -407,6 +410,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                     if i == 0:
                         log_step(total_episodes, global_step, obs_i,
                                  obs_dis_list[i], action_indices[i], action_vals[i], r_i)
+                        recent_actions.append(action_indices[i])
 
                 # ---- Progress bar update ----
                 if ep_completed_this_step > 0:
@@ -419,13 +423,26 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                     avg_len  = sum_ep_length / n_new
                     print(f"\n[Episode {total_episodes}] avg_score: {avg:.2f}  avg_len: {avg_len:.0f}  epsilon: {agent.epsilon:.4f}")
 
-                    # TensorBoard: periodic averages
-                    tb_writer.add_scalar("train/avg_episode_reward", avg,      total_episodes)
-                    tb_writer.add_scalar("train/avg_episode_length", avg_len,  total_episodes)
-                    tb_writer.add_scalar("train/epsilon",            agent.epsilon, total_episodes)
+                    # TensorBoard: matches Isaac Lab default format
+                    tb_writer.add_scalar("rollout/ep_rew_mean", avg,     global_step)
+                    tb_writer.add_scalar("rollout/ep_len_mean", avg_len, global_step)
+
+                    elapsed = time.time() - train_start_time
+                    fps     = global_step / elapsed if elapsed > 0 else 0.0
+                    tb_writer.add_scalar("time/fps",              fps,            global_step)
+                    tb_writer.add_scalar("train/learning_rate",   learning_rate,  global_step)
+                    tb_writer.add_scalar("train/epsilon",         agent.epsilon,  global_step)
+
                     if agent.training_error:
                         mean_err = float(np.mean(agent.training_error[-1000:]))
-                        tb_writer.add_scalar("train/mean_td_error", mean_err, total_episodes)
+                        tb_writer.add_scalar("train/loss", mean_err, global_step)
+
+                    if recent_actions:
+                        counts  = np.bincount(recent_actions, minlength=num_of_action).astype(float)
+                        probs   = counts / counts.sum()
+                        entropy = -float(np.sum(probs * np.log(probs + 1e-12)))
+                        tb_writer.add_scalar("train/entropy_loss", entropy, global_step)
+                        recent_actions.clear()
 
                     sum_reward  = 0.0
                     sum_ep_length = 0.0
