@@ -5,13 +5,24 @@
 import argparse
 import sys
 import os
+import json
 
 from isaaclab.app import AppLauncher
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from RL_Algorithm.Algorithm.Q_Learning import Q_Learning
-from tqdm import tqdm
+# --------------------------------------------------------------------------- #
+# Algorithm selection via environment variable.
+# Hydra has its own internal argparse that rejects unknown --flags, so we
+# cannot use a normal CLI argument. Use RL_ALGORITHM env var instead:
+#
+#   RL_ALGORITHM=MC python scripts/RL_Algorithm/train.py --task ... --headless
+# --------------------------------------------------------------------------- #
+_ALGORITHM_CHOICES = ["MC", "SARSA", "Q_Learning", "Double_Q_Learning"]
+_algorithm_name = os.environ.get("RL_ALGORITHM", "Q_Learning")
+
+if _algorithm_name not in _ALGORITHM_CHOICES:
+    raise ValueError(f"RL_ALGORITHM must be one of {_ALGORITHM_CHOICES}, got '{_algorithm_name}'")
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
@@ -22,7 +33,6 @@ parser.add_argument("--num_envs", type=int, default=1, help="Number of environme
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
 parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
 parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy training iterations.")
-
 
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
@@ -41,6 +51,8 @@ simulation_app = app_launcher.app
 
 """Rest everything follows."""
 
+import csv
+import numpy as np
 import gymnasium as gym
 import torch
 from datetime import datetime
@@ -64,6 +76,7 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 torch.backends.cudnn.deterministic = False
 torch.backends.cudnn.benchmark = False
+
 
 @hydra_task_config(args_cli.task, "sb3_cfg_entry_point")
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlOnPolicyRunnerCfg):
@@ -95,93 +108,320 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             "disable_logger": True,
         }
         print("[INFO] Recording videos during training.")
-        print_dict(video_kwargs, nesting=4)
         env = gym.wrappers.RecordVideo(env, **video_kwargs)
 
     # ==================================================================== #
     # ========================= Can be modified ========================== #
 
-    # hyperparameters
-    num_of_action = None
-    action_range = [None, None]  # [min, max]
-    discretize_state_weight = [None, None, None, None]  # [pose_cart:int, pose_pole:int, vel_cart:int, vel_pole:int]
-    learning_rate = None
-    n_episodes = None
-    start_epsilon = None
-    epsilon_decay = None  # reduce the exploration over time
-    final_epsilon = None
-    discount = None
+    Algorithm_name = _algorithm_name
+    task_name = str(args_cli.task).split('-')[0]  # e.g. Stabilize, SwingUp
 
-    task_name = str(args_cli.task).split('-')[0]  # Stabilize, SwingUp
-    Algorithm_name = "Q_Learning"
-    agent = Q_Learning(
-        num_of_action=num_of_action,
-        action_range=action_range,
-        discretize_state_weight=discretize_state_weight,
-        learning_rate=learning_rate,
-        initial_epsilon=start_epsilon,
-        epsilon_decay=epsilon_decay,
-        final_epsilon=final_epsilon,
-        discount_factor=discount
+    # Load per-algorithm hyperparameters from config file
+    config_path = os.path.join(os.path.dirname(__file__), "configs", f"{Algorithm_name}.json")
+    with open(config_path, "r") as f:
+        cfg = json.load(f)
+
+    num_of_action           = cfg["num_of_action"]
+    action_range            = cfg["action_range"]            # [min, max]
+    discretize_state_weight = cfg["discretize_state_weight"] # [pose_cart, pose_pole, vel_cart, vel_pole]
+    learning_rate           = cfg["learning_rate"]
+    n_episodes              = cfg["n_episodes"]
+    start_epsilon           = cfg["start_epsilon"]
+    epsilon_decay           = cfg["epsilon_decay"]
+    final_epsilon           = cfg["final_epsilon"]
+    discount                = cfg["discount"]
+
+    # Build agent based on selected algorithm
+    match Algorithm_name:
+        case "MC":
+            from RL_Algorithm.Algorithm.MC import MC
+            agent = MC(
+                num_of_action=num_of_action,
+                action_range=action_range,
+                discretize_state_weight=discretize_state_weight,
+                learning_rate=learning_rate,
+                initial_epsilon=start_epsilon,
+                epsilon_decay=epsilon_decay,
+                final_epsilon=final_epsilon,
+                discount_factor=discount,
+            )
+        case "SARSA":
+            from RL_Algorithm.Algorithm.SARSA import SARSA
+            agent = SARSA(
+                num_of_action=num_of_action,
+                action_range=action_range,
+                discretize_state_weight=discretize_state_weight,
+                learning_rate=learning_rate,
+                initial_epsilon=start_epsilon,
+                epsilon_decay=epsilon_decay,
+                final_epsilon=final_epsilon,
+                discount_factor=discount,
+            )
+        case "Q_Learning":
+            from RL_Algorithm.Algorithm.Q_Learning import Q_Learning
+            agent = Q_Learning(
+                num_of_action=num_of_action,
+                action_range=action_range,
+                discretize_state_weight=discretize_state_weight,
+                learning_rate=learning_rate,
+                initial_epsilon=start_epsilon,
+                epsilon_decay=epsilon_decay,
+                final_epsilon=final_epsilon,
+                discount_factor=discount,
+            )
+        case "Double_Q_Learning":
+            from RL_Algorithm.Algorithm.Double_Q_Learning import Double_Q_Learning
+            agent = Double_Q_Learning(
+                num_of_action=num_of_action,
+                action_range=action_range,
+                discretize_state_weight=discretize_state_weight,
+                learning_rate=learning_rate,
+                initial_epsilon=start_epsilon,
+                epsilon_decay=epsilon_decay,
+                final_epsilon=final_epsilon,
+                discount_factor=discount,
+            )
+
+    # ---- CSV logging setup ----
+    csv_dir = os.path.join("logs", task_name, Algorithm_name)
+    os.makedirs(csv_dir, exist_ok=True)
+    csv_filename = os.path.join(
+        csv_dir, f"training_log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.csv"
     )
+    q_col_names = [f"q_{i}" for i in range(num_of_action)]
+    csv_fieldnames = [
+        "episode", "step",
+        "cart_pos", "pole_angle", "cart_vel", "pole_vel",
+        "cart_pos_dis", "pole_angle_dis", "cart_vel_dis", "pole_vel_dis",
+        "action_idx", "action_val",
+        "reward", "epsilon",
+    ] + q_col_names
+    csv_file = open(csv_filename, "w", newline="")
+    csv_writer = csv.DictWriter(csv_file, fieldnames=csv_fieldnames)
+    csv_writer.writeheader()
 
-    # reset environment
+    def log_step(episode, step, raw_obs, obs_dis, action_idx, action_val, reward):
+        """Write one row to the CSV log."""
+        state = raw_obs["policy"].cpu().numpy().flatten()
+        q_vals = agent.q_values[obs_dis]
+        row = {
+            "episode":        episode,
+            "step":           step,
+            "cart_pos":       float(state[0]),
+            "pole_angle":     float(state[1]),
+            "cart_vel":       float(state[2]),
+            "pole_vel":       float(state[3]),
+            "cart_pos_dis":   obs_dis[0],
+            "pole_angle_dis": obs_dis[1],
+            "cart_vel_dis":   obs_dis[2],
+            "pole_vel_dis":   obs_dis[3],
+            "action_idx":     action_idx,
+            "action_val":     float(action_val),
+            "reward":         float(reward),
+            "epsilon":        float(agent.epsilon),
+        }
+        for i, q in enumerate(q_vals):
+            row[f"q_{i}"] = float(q)
+        csv_writer.writerow(row)
+
+    # ---- Q-value save directory ----
+    q_save_dir = os.path.join("q_value", task_name, Algorithm_name)
+    os.makedirs(q_save_dir, exist_ok=True)
+
+    from tqdm import tqdm
+
+    # Number of parallel environments
+    num_envs = args_cli.num_envs if args_cli.num_envs is not None else 1
+
+    # ---- Per-env state tracking ----
+    episode_rewards = np.zeros(num_envs)   # cumulative reward for each env's current episode
+    total_episodes  = 0                    # total completed episodes across all envs
+    sum_reward      = 0.0                  # accumulates episode returns for periodic printing
+    last_log_ep     = 0                    # last episode count when we printed/saved
+    global_step     = 0
+
+    # MC: per-env episode histories (agent's single-list histories won't work for multi-env)
+    if Algorithm_name == "MC":
+        mc_obs_hist    = [[] for _ in range(num_envs)]
+        mc_action_hist = [[] for _ in range(num_envs)]
+        mc_reward_hist = [[] for _ in range(num_envs)]
+
+    # SARSA: per-env current (obs_dis, action_idx) — needed for on-policy next-action tracking
+    if Algorithm_name == "SARSA":
+        sarsa_obs_dis    = [None] * num_envs
+        sarsa_action_idx = [None] * num_envs
+
+    # Initial environment reset
     obs, _ = env.reset()
-    timestep = 0
-    sum_reward = 0
+
+    # SARSA: initialise first action for every env before the loop
+    if Algorithm_name == "SARSA":
+        for i in range(num_envs):
+            obs_i = {"policy": obs["policy"][i : i + 1]}
+            sarsa_obs_dis[i]    = agent.discretize_state(obs_i)
+            sarsa_action_idx[i] = agent.get_discretize_action(sarsa_obs_dis[i])
+
     # simulate environment
     while simulation_app.is_running():
-        # run everything in inference mode
         with torch.inference_mode():
-        
-            for episode in tqdm(range(n_episodes)):
-                obs, _ = env.reset()
-                done = False
-                cumulative_reward = 0
 
-                while not done:
-                    # agent stepping
-                    action, action_idx = agent.get_action(obs)
+            pbar = tqdm(total=n_episodes, desc=f"[{Algorithm_name}] Episodes")
 
-                    # env stepping
-                    next_obs, reward, terminated, truncated, _ = env.step(action)
+            while total_episodes < n_episodes:
 
-                    reward_value = reward.item()
-                    terminated_value = terminated.item() 
-                    cumulative_reward += reward_value
+                # ---- Select action for every env ----
+                action_indices = []
+                obs_dis_list   = []
 
-                    agent.update(
-                        #== put your code here ==#
+                for i in range(num_envs):
+                    obs_i = {"policy": obs["policy"][i : i + 1]}
+
+                    if Algorithm_name == "SARSA":
+                        # Reuse previously selected action (on-policy requirement)
+                        obs_dis    = sarsa_obs_dis[i]
+                        action_idx = sarsa_action_idx[i]
+                    else:
+                        obs_dis    = agent.discretize_state(obs_i)
+                        action_idx = agent.get_discretize_action(obs_dis)
+
+                    obs_dis_list.append(obs_dis)
+                    action_indices.append(action_idx)
+
+                    # MC: append this step to the per-env history
+                    if Algorithm_name == "MC":
+                        mc_obs_hist[i].append(obs_dis)
+                        mc_action_hist[i].append(action_idx)
+
+                # ---- Build batch action tensor [num_envs, 1] ----
+                action_vals = [
+                    action_range[0] + (action_range[1] - action_range[0]) * a / (num_of_action - 1)
+                    for a in action_indices
+                ]
+                action_tensor = torch.tensor([[v] for v in action_vals], dtype=torch.float32)
+
+                # ---- Step environment ----
+                next_obs, reward, terminated, truncated, _ = env.step(action_tensor)
+                done_flags = terminated | truncated   # bool tensor [num_envs]
+
+                # ---- Per-env update ----
+                ep_completed_this_step = 0
+
+                for i in range(num_envs):
+                    obs_i      = {"policy": obs["policy"][i : i + 1]}
+                    next_obs_i = {"policy": next_obs["policy"][i : i + 1]}
+
+                    r_i    = float(reward[i].item())
+                    done_i = bool(done_flags[i].item())
+
+                    episode_rewards[i] += r_i
+
+                    match Algorithm_name:
+
+                        case "MC":
+                            mc_reward_hist[i].append(r_i)
+
+                            if done_i:
+                                # Compute discounted returns backwards and update Q-table
+                                G = 0.0
+                                for t in reversed(range(len(mc_reward_hist[i]))):
+                                    G = discount * G + mc_reward_hist[i][t]
+                                    s = mc_obs_hist[i][t]
+                                    a = mc_action_hist[i][t]
+                                    agent.n_values[s][a] += 1
+                                    error = G - agent.q_values[s][a]
+                                    agent.q_values[s][a] += error / agent.n_values[s][a]
+                                    agent.training_error.append(abs(error))
+
+                                mc_obs_hist[i].clear()
+                                mc_action_hist[i].clear()
+                                mc_reward_hist[i].clear()
+
+                                sum_reward += episode_rewards[i]
+                                episode_rewards[i] = 0.0
+                                total_episodes += 1
+                                ep_completed_this_step += 1
+
+                        case "SARSA":
+                            next_obs_dis    = agent.discretize_state(next_obs_i)
+                            next_action_idx = agent.get_discretize_action(next_obs_dis)
+
+                            agent.update(obs_dis_list[i], action_indices[i], r_i,
+                                         next_obs_dis, next_action_idx, done_i)
+
+                            if done_i:
+                                sum_reward += episode_rewards[i]
+                                episode_rewards[i] = 0.0
+                                total_episodes += 1
+                                ep_completed_this_step += 1
+                                # Isaac Lab auto-resets: next_obs_i is already the reset obs
+                                sarsa_obs_dis[i]    = agent.discretize_state(next_obs_i)
+                                sarsa_action_idx[i] = agent.get_discretize_action(sarsa_obs_dis[i])
+                            else:
+                                sarsa_obs_dis[i]    = next_obs_dis
+                                sarsa_action_idx[i] = next_action_idx
+
+                        case "Q_Learning":
+                            next_obs_dis = agent.discretize_state(next_obs_i)
+                            agent.update(obs_dis_list[i], action_indices[i], r_i, next_obs_dis, done_i)
+
+                            if done_i:
+                                sum_reward += episode_rewards[i]
+                                episode_rewards[i] = 0.0
+                                total_episodes += 1
+                                ep_completed_this_step += 1
+
+                        case "Double_Q_Learning":
+                            next_obs_dis = agent.discretize_state(next_obs_i)
+                            agent.update(obs_dis_list[i], action_indices[i], r_i, next_obs_dis, done_i)
+
+                            if done_i:
+                                sum_reward += episode_rewards[i]
+                                episode_rewards[i] = 0.0
+                                total_episodes += 1
+                                ep_completed_this_step += 1
+
+                    # Log only env 0 every step to keep CSV size manageable
+                    if i == 0:
+                        log_step(total_episodes, global_step, obs_i,
+                                 obs_dis_list[i], action_indices[i], action_vals[i], r_i)
+
+                # ---- Progress bar update ----
+                if ep_completed_this_step > 0:
+                    pbar.update(ep_completed_this_step)
+
+                # ---- Periodic print and Q-value save (every 100 completed episodes) ----
+                if total_episodes - last_log_ep >= 100 and total_episodes > 0:
+                    n_new = total_episodes - last_log_ep
+                    avg   = sum_reward / n_new
+                    print(f"\n[Episode {total_episodes}] avg_score: {avg:.2f}  epsilon: {agent.epsilon:.4f}")
+                    sum_reward  = 0.0
+                    last_log_ep = total_episodes
+
+                    q_value_file = (
+                        f"{Algorithm_name}_{total_episodes}"
+                        f"_{num_of_action}_{action_range[1]}"
+                        f"_{discretize_state_weight[0]}_{discretize_state_weight[1]}.json"
                     )
+                    agent.save_q_value(q_save_dir, q_value_file)
 
-                    done = terminated or truncated
-                    obs = next_obs
-                
-                sum_reward += cumulative_reward
-                if episode % 100 == 0:
-                    print("avg_score: ", sum_reward / 100.0)
-                    sum_reward = 0
-                    print(agent.epsilon)
-
-                    # Save Q-Learning agent
-                    q_value_file = f"{Algorithm_name}_{episode}_{num_of_action}_{action_range[1]}_{discretize_state_weight[0]}_{discretize_state_weight[1]}.json"
-                    full_path = os.path.join(f"q_value/{task_name}", Algorithm_name)
-                    agent.save_q_value(full_path, q_value_file)
-
+                # ---- Epsilon decay: once per global step ----
                 agent.decay_epsilon()
-             
-        if args_cli.video:
-            timestep += 1
-            # Exit the play loop after recording one video
-            if timestep == args_cli.video_length:
-                break
-        
+
+                obs = next_obs
+                global_step += 1
+
+            pbar.close()
+
+        csv_file.close()
         print("!!! Training is complete !!!")
+        print(f"CSV log saved to: {csv_filename}")
         break
+
     # ==================================================================== #
 
     # close the simulator
     env.close()
+
 
 if __name__ == "__main__":
     # run the main function

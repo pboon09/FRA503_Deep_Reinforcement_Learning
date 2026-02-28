@@ -1,0 +1,11 @@
+{
+  "num_of_action": 100,
+  "action_range": [-10.0, 10.0],
+  "discretize_state_weight": [1, 8, 1, 8],
+  "learning_rate": 0.1,
+  "n_episodes": 10000,
+  "start_epsilon": 1.0,
+  "epsilon_decay": 0.9995,
+  "final_epsilon": 0.01,
+  "discount": 0.99
+}

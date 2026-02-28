@@ -41,11 +41,38 @@ class MC(BaseAlgorithm):
         
     def update(
         self,
-        
+        obs_dis,
+        action,
+        reward,
+        done,
     ):
         """
         Update Q-values using Monte Carlo.
 
-        This method applies the Monte Carlo update rule to improve policy decisions by updating the Q-table.
+        Accumulates (obs_dis, action, reward) each step. When done=True, computes
+        discounted returns backwards and updates Q-values via incremental mean.
+
+        Args:
+            obs_dis (tuple): Discretized state at current step.
+            action (int): Discrete action taken.
+            reward (float): Reward received.
+            done (bool): Whether the episode has ended.
         """
-        pass
+        self.obs_hist.append(obs_dis)
+        self.action_hist.append(action)
+        self.reward_hist.append(reward)
+
+        if done:
+            G = 0
+            for t in reversed(range(len(self.reward_hist))):
+                G = self.discount_factor * G + self.reward_hist[t]
+                s = self.obs_hist[t]
+                a = self.action_hist[t]
+                self.n_values[s][a] += 1
+                error = G - self.q_values[s][a]
+                # Incremental mean update (equivalent to learning with 1/N step size)
+                self.q_values[s][a] += error / self.n_values[s][a]
+                self.training_error.append(abs(error))
+            self.obs_hist.clear()
+            self.action_hist.clear()
+            self.reward_hist.clear()

@@ -82,7 +82,12 @@ class BaseAlgorithm():
         """
 
         # ========= put your code here =========#
-        pass
+        state = obs["policy"].cpu().numpy().flatten()
+        cart_pos_d  = int(np.round(state[0] * self.discretize_state_weight[0]))
+        pole_ang_d  = int(np.round(state[1] * self.discretize_state_weight[1]))
+        cart_vel_d  = int(np.round(state[2] * self.discretize_state_weight[2]))
+        pole_vel_d  = int(np.round(state[3] * self.discretize_state_weight[3]))
+        return (cart_pos_d, pole_ang_d, cart_vel_d, pole_vel_d)
         # ======================================#
 
     def get_discretize_action(self, obs_dis) -> int:
@@ -96,9 +101,11 @@ class BaseAlgorithm():
             int: Chosen discrete action index.
         """
         # ========= put your code here =========#
-        pass
+        if np.random.random() < self.epsilon:
+            return np.random.randint(0, self.num_of_action)
+        return int(np.argmax(self.q_values[obs_dis]))
         # ======================================#
-    
+
     def mapping_action(self, action):
         """
         Maps a discrete action in range [0, n] to a continuous value in [action_min, action_max].
@@ -111,8 +118,10 @@ class BaseAlgorithm():
             torch.Tensor: Scaled action tensor.
         """
         # ========= put your code here =========#
-        pass
-        # ======================================#s
+        action_min, action_max = self.action_range
+        val = action_min + (action_max - action_min) * action / (self.num_of_action - 1)
+        return torch.tensor([[val]], dtype=torch.float32)
+        # ======================================#
 
     def get_action(self, obs) -> torch.tensor:
         """
@@ -133,6 +142,7 @@ class BaseAlgorithm():
         """
         Decay epsilon value to reduce exploration over time.
         """
+        self.epsilon = max(self.final_epsilon, self.epsilon * self.epsilon_decay)
 
     def save_q_value(self, path, filename):
         """

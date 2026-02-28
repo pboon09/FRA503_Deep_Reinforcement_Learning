@@ -28,7 +28,7 @@ class SARSA(BaseAlgorithm):
             discount_factor (float): Discount factor for future rewards.
         """
         super().__init__(
-            control_type=ControlType.SARSA,
+            control_type=ControlType.TEMPORAL_DIFFERENCE,
             num_of_action=num_of_action,
             action_range=action_range,
             discretize_state_weight=discretize_state_weight,
@@ -41,11 +41,32 @@ class SARSA(BaseAlgorithm):
         
     def update(
         self,
-
+        obs_dis,
+        action,
+        reward,
+        next_obs_dis,
+        next_action,
+        done,
     ):
         """
-        Update Q-values using SARSA .
+        Update Q-values using SARSA (on-policy TD).
 
-        This method applies the SARSA update rule to improve policy decisions by updating the Q-table.
+        Q(s,a) <- Q(s,a) + lr * [r + gamma * Q(s',a') - Q(s,a)]
+        next_action must be chosen by the same epsilon-greedy policy before calling update.
+
+        Args:
+            obs_dis (tuple): Discretized current state.
+            action (int): Action taken at current state.
+            reward (float): Reward received.
+            next_obs_dis (tuple): Discretized next state.
+            next_action (int): Action selected at next state (epsilon-greedy).
+            done (bool): Whether the episode has ended.
         """
-        pass
+        if done:
+            target = reward
+        else:
+            target = reward + self.discount_factor * self.q_values[next_obs_dis][next_action]
+
+        td_error = target - self.q_values[obs_dis][action]
+        self.q_values[obs_dis][action] += self.lr * td_error
+        self.training_error.append(abs(td_error))
