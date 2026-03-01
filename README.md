@@ -62,3 +62,19 @@ python scripts/RL_Algorithm/visualize/plot_q_surface.py \
              "q_value/Stabilize/Double_Q_Learning/Double_Q_Learning_10000_*.json" \
     --output figures/ --show
 ```
+
+### Run All Experiments (Single Command)
+
+```bash
+# All suites: baseline + state resolution + action resolution
+python run_experiments.py
+
+# Baseline only
+python run_experiments.py --suites 1
+
+# Resolution sweeps only (uses Double_Q_Learning by default)
+python run_experiments.py --suites 2 3
+
+# Use a different algorithm for sweeps
+python run_experiments.py --suites 2 3 --best-algo Q_Learning
+```
