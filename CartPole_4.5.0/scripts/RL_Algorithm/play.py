@@ -16,6 +16,7 @@ parser = argparse.ArgumentParser(description="Evaluate a trained RL agent.")
 parser.add_argument("--video", action="store_true", default=False, help="Record videos during evaluation.")
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
 parser.add_argument("--video_interval", type=int, default=2000, help="Interval between video recordings (in steps).")
+parser.add_argument("--video_dir", type=str, default="videos", help="Directory to save recorded videos.")
 parser.add_argument("--num_envs", type=int, default=1, help="Number of environments to simulate.")
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
 parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
@@ -79,6 +80,17 @@ def main():
 
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+
+    # wrap for video recording
+    if args_cli.video:
+        video_kwargs = {
+            "video_folder": args_cli.video_dir,
+            "episode_trigger": lambda episode_id: True,
+            "video_length": args_cli.video_length,
+            "disable_logger": True,
+        }
+        print(f"[INFO] Recording videos to {args_cli.video_dir}")
+        env = gym.wrappers.RecordVideo(env, **video_kwargs)
 
     # ==================================================================== #
     # ========================= Can be modified ========================== #

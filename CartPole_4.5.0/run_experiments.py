@@ -4,9 +4,9 @@
 Executes 4 experimental suites, collects logs + Q-tables, and generates plots:
 
   Suite 1: Baseline       - all 4 algorithms with default config
-  Suite 2: Action Resol.  - Q_Learning with num_of_action = 5, 25, 50
-  Suite 3: State Resol.   - Q_Learning with different discretize_state_weight
-  Suite 4: Deployment     - play.py evaluation with epsilon=0
+  Suite 2: Action Resol.  - all 4 algorithms with num_of_action = 5, 25, 50
+  Suite 3: State Resol.   - all 4 algorithms with different discretize_state_weight
+  Suite 4: Deployment     - play.py evaluation with epsilon=0, video recording, bar charts
 
     python run_experiments.py
 """
@@ -27,6 +27,7 @@ TRAIN_SCRIPT = os.path.join(ROOT, "scripts", "RL_Algorithm", "train.py")
 PLAY_SCRIPT = os.path.join(ROOT, "scripts", "RL_Algorithm", "play.py")
 PLOT_TRAINING = os.path.join(ROOT, "scripts", "RL_Algorithm", "visualize", "plot_training.py")
 PLOT_Q_SURFACE = os.path.join(ROOT, "scripts", "RL_Algorithm", "visualize", "plot_q_surface.py")
+PLOT_DEPLOYMENT = os.path.join(ROOT, "scripts", "RL_Algorithm", "visualize", "plot_deployment.py")
 CONFIG_PATH = os.path.join(ROOT, "scripts", "RL_Algorithm", "configs", "rl_config.json")
 
 TASK = "Stabilize-Isaac-Cartpole-v0"
@@ -67,7 +68,8 @@ def train(algorithm: str) -> bool:
 
 
 def evaluate(algorithm: str, qtable_path: str, num_episodes: int = 10,
-             output_csv: str = "evaluation_results.csv") -> bool:
+             output_csv: str = "evaluation_results.csv",
+             video: bool = False, video_dir: str = None) -> bool:
     """Run play.py to evaluate a trained Q-table. Returns True on success."""
     cmd = [
         sys.executable, PLAY_SCRIPT,
@@ -76,11 +78,17 @@ def evaluate(algorithm: str, qtable_path: str, num_episodes: int = 10,
         "--qtable_path", qtable_path,
         "--num_episodes", str(num_episodes),
         "--output_csv", output_csv,
-        "--headless",
     ]
+
+    if video and video_dir:
+        cmd.extend(["--video", "--video_dir", video_dir])
+    else:
+        cmd.append("--headless")
 
     print(f"\n{'='*60}")
     print(f"  EVALUATE: {algorithm} ({os.path.basename(qtable_path)})")
+    if video:
+        print(f"  VIDEO -> {video_dir}")
     print(f"{'='*60}\n")
 
     result = subprocess.run(cmd, env=os.environ.copy(), cwd=ROOT)
@@ -201,7 +209,7 @@ def main():
 
     run_plots(suite1_csvs, suite1_qtables, suite1_fig)
 
-    # ── Suite 2: Action Resolution (Q_Learning, num_of_action sweep) ─────
+    # ── Suite 2: Action Resolution (all algos, num_of_action sweep) ──────
     print(f"\n{'#'*60}")
     print("  SUITE 2: Action Resolution")
     print(f"{'#'*60}")
@@ -211,43 +219,46 @@ def main():
     suite2_csvs = []
     suite2_qtables = []
 
-    # Copy baseline Q_Learning as the act_5 reference
-    baseline_ql_csv = os.path.join(suite1_dir, "Q_Learning.csv")
-    baseline_ql_qt = os.path.join(suite1_dir, "Q_Learning.json")
-    if os.path.isfile(baseline_ql_csv):
-        os.makedirs(suite2_dir, exist_ok=True)
-        dest = os.path.join(suite2_dir, "Q_Learning_act_5.csv")
-        shutil.copy2(baseline_ql_csv, dest)
-        suite2_csvs.append(dest)
-        print(f"  Copied baseline -> {dest}")
-    if os.path.isfile(baseline_ql_qt):
-        os.makedirs(suite2_dir, exist_ok=True)
-        dest = os.path.join(suite2_dir, "Q_Learning_act_5.json")
-        shutil.copy2(baseline_ql_qt, dest)
-        suite2_qtables.append(dest)
-        print(f"  Copied baseline -> {dest}")
+    # Copy ALL baseline algorithms as the act_5 reference
+    for algo in ALL_ALGOS:
+        baseline_csv = os.path.join(suite1_dir, f"{algo}.csv")
+        baseline_qt = os.path.join(suite1_dir, f"{algo}.json")
+        if os.path.isfile(baseline_csv):
+            os.makedirs(suite2_dir, exist_ok=True)
+            dest = os.path.join(suite2_dir, f"{algo}_act_5.csv")
+            shutil.copy2(baseline_csv, dest)
+            suite2_csvs.append(dest)
+            print(f"  Copied baseline -> {dest}")
+        if os.path.isfile(baseline_qt):
+            os.makedirs(suite2_dir, exist_ok=True)
+            dest = os.path.join(suite2_dir, f"{algo}_act_5.json")
+            shutil.copy2(baseline_qt, dest)
+            suite2_qtables.append(dest)
+            print(f"  Copied baseline -> {dest}")
 
+    # Train ALL algorithms for each action resolution
     for n_act in [25, 50]:
         original = mutate_config({"num_of_action": n_act})
         try:
-            ok = train("Q_Learning")
-            if not ok:
-                print(f"  ERROR: Q_Learning (act={n_act}) training failed.")
-                continue
-            csv_path = collect_csv_named("Q_Learning", suite2_dir,
-                                         f"Q_Learning_act_{n_act}.csv")
-            qt_path = collect_qtable_named("Q_Learning", suite2_dir,
-                                            f"Q_Learning_act_{n_act}.json")
-            if csv_path:
-                suite2_csvs.append(csv_path)
-            if qt_path:
-                suite2_qtables.append(qt_path)
+            for algo in ALL_ALGOS:
+                ok = train(algo)
+                if not ok:
+                    print(f"  ERROR: {algo} (act={n_act}) training failed.")
+                    continue
+                csv_path = collect_csv_named(algo, suite2_dir,
+                                             f"{algo}_act_{n_act}.csv")
+                qt_path = collect_qtable_named(algo, suite2_dir,
+                                               f"{algo}_act_{n_act}.json")
+                if csv_path:
+                    suite2_csvs.append(csv_path)
+                if qt_path:
+                    suite2_qtables.append(qt_path)
         finally:
             restore_config(original)
 
     run_plots(suite2_csvs, suite2_qtables, suite2_fig)
 
-    # ── Suite 3: State Resolution (Q_Learning, discretize_state_weight sweep)
+    # ── Suite 3: State Resolution (all algos, discretize_state_weight sweep)
     print(f"\n{'#'*60}")
     print("  SUITE 3: State Resolution")
     print(f"{'#'*60}")
@@ -257,40 +268,45 @@ def main():
     suite3_csvs = []
     suite3_qtables = []
 
-    # Copy baseline Q_Learning as the mid reference
-    if os.path.isfile(baseline_ql_csv):
-        os.makedirs(suite3_dir, exist_ok=True)
-        dest = os.path.join(suite3_dir, "Q_Learning_mid_1_8_1_8.csv")
-        shutil.copy2(baseline_ql_csv, dest)
-        suite3_csvs.append(dest)
-        print(f"  Copied baseline -> {dest}")
-    if os.path.isfile(baseline_ql_qt):
-        os.makedirs(suite3_dir, exist_ok=True)
-        dest = os.path.join(suite3_dir, "Q_Learning_mid_1_8_1_8.json")
-        shutil.copy2(baseline_ql_qt, dest)
-        suite3_qtables.append(dest)
-        print(f"  Copied baseline -> {dest}")
+    # Copy ALL baseline algorithms as the mid reference
+    for algo in ALL_ALGOS:
+        baseline_csv = os.path.join(suite1_dir, f"{algo}.csv")
+        baseline_qt = os.path.join(suite1_dir, f"{algo}.json")
+        if os.path.isfile(baseline_csv):
+            os.makedirs(suite3_dir, exist_ok=True)
+            dest = os.path.join(suite3_dir, f"{algo}_mid_1_8_1_8.csv")
+            shutil.copy2(baseline_csv, dest)
+            suite3_csvs.append(dest)
+            print(f"  Copied baseline -> {dest}")
+        if os.path.isfile(baseline_qt):
+            os.makedirs(suite3_dir, exist_ok=True)
+            dest = os.path.join(suite3_dir, f"{algo}_mid_1_8_1_8.json")
+            shutil.copy2(baseline_qt, dest)
+            suite3_qtables.append(dest)
+            print(f"  Copied baseline -> {dest}")
 
     state_weight_configs = [
         {"weights": [1, 2, 1, 2], "label": "low_1_2_1_2"},
         {"weights": [2, 16, 2, 16], "label": "high_2_16_2_16"},
     ]
 
+    # Train ALL algorithms for each state weight config
     for cfg in state_weight_configs:
         original = mutate_config({"discretize_state_weight": cfg["weights"]})
         try:
-            ok = train("Q_Learning")
-            if not ok:
-                print(f"  ERROR: Q_Learning (state={cfg['label']}) training failed.")
-                continue
-            csv_path = collect_csv_named("Q_Learning", suite3_dir,
-                                         f"Q_Learning_{cfg['label']}.csv")
-            qt_path = collect_qtable_named("Q_Learning", suite3_dir,
-                                            f"Q_Learning_{cfg['label']}.json")
-            if csv_path:
-                suite3_csvs.append(csv_path)
-            if qt_path:
-                suite3_qtables.append(qt_path)
+            for algo in ALL_ALGOS:
+                ok = train(algo)
+                if not ok:
+                    print(f"  ERROR: {algo} (state={cfg['label']}) training failed.")
+                    continue
+                csv_path = collect_csv_named(algo, suite3_dir,
+                                             f"{algo}_{cfg['label']}.csv")
+                qt_path = collect_qtable_named(algo, suite3_dir,
+                                               f"{algo}_{cfg['label']}.json")
+                if csv_path:
+                    suite3_csvs.append(csv_path)
+                if qt_path:
+                    suite3_qtables.append(qt_path)
         finally:
             restore_config(original)
 
@@ -302,18 +318,32 @@ def main():
     print(f"{'#'*60}")
 
     suite4_dir = os.path.join(ROOT, "experiments", "suite_4_deployment")
+    suite4_fig = os.path.join(ROOT, "figures", "suite_4_deployment")
+    suite4_video_dir = os.path.join(suite4_dir, "videos")
     os.makedirs(suite4_dir, exist_ok=True)
     eval_csv = os.path.join(suite4_dir, "evaluation_results.csv")
+
+    # Remove stale CSV so headers are fresh
+    if os.path.isfile(eval_csv):
+        os.remove(eval_csv)
 
     for algo in ALL_ALGOS:
         qtable_path = os.path.join(suite1_dir, f"{algo}.json")
         if not os.path.isfile(qtable_path):
             print(f"  WARNING: No Q-table for {algo}, skipping evaluation.")
             continue
-        evaluate(algo, qtable_path, num_episodes=10, output_csv=eval_csv)
+        algo_video_dir = os.path.join(suite4_video_dir, algo)
+        evaluate(algo, qtable_path, num_episodes=10, output_csv=eval_csv,
+                 video=True, video_dir=algo_video_dir)
 
+    # Generate deployment bar charts
     if os.path.isfile(eval_csv):
         print(f"\n  Evaluation results: {eval_csv}")
+        os.makedirs(suite4_fig, exist_ok=True)
+        plot_cmd = [sys.executable, PLOT_DEPLOYMENT,
+                    "--csv", eval_csv, "--output", suite4_fig]
+        print(f"  PLOT DEPLOYMENT -> {suite4_fig}/")
+        subprocess.run(plot_cmd, cwd=ROOT)
 
     # ── Summary ──────────────────────────────────────────────────────────
     print("\n" + "=" * 60)
