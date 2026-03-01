@@ -118,20 +118,26 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     Algorithm_name = _algorithm_name
     task_name = str(args_cli.task).split('-')[0]  # e.g. Stabilize, SwingUp
 
-    # Load per-algorithm hyperparameters from config file
-    config_path = os.path.join(os.path.dirname(__file__), "configs", f"{Algorithm_name}.json")
+    # Load hyperparameter configuration
+    config_path = os.path.join(os.path.dirname(__file__), "configs", "rl_config.json")
     with open(config_path, "r") as f:
-        cfg = json.load(f)
+        full_cfg = json.load(f)
 
-    num_of_action           = cfg["num_of_action"]
-    action_range            = cfg["action_range"]            # [min, max]
-    discretize_state_weight = cfg["discretize_state_weight"] # [pose_cart, pose_pole, vel_cart, vel_pole]
-    learning_rate           = cfg["learning_rate"]
-    n_episodes              = cfg["n_episodes"]
-    start_epsilon           = cfg["start_epsilon"]
-    epsilon_decay           = cfg["epsilon_decay"]
-    final_epsilon           = cfg["final_epsilon"]
-    discount                = cfg["discount"]
+    # Extract shared and algorithm-specific configs
+    shared_cfg = full_cfg["shared"]
+    algo_cfg   = full_cfg["algorithms"].get(Algorithm_name, {})
+
+    num_of_action           = shared_cfg["num_of_action"]
+    action_range            = shared_cfg["action_range"]            # [min, max]
+    discretize_state_weight = shared_cfg["discretize_state_weight"] # [pose_cart, pose_pole, vel_cart, vel_pole]
+    n_episodes              = shared_cfg["n_episodes"]
+    start_epsilon           = shared_cfg["start_epsilon"]
+    epsilon_decay           = shared_cfg["epsilon_decay"]
+    final_epsilon           = shared_cfg["final_epsilon"]
+    discount                = shared_cfg["discount"]
+
+    # Allow algorithm-specific override, fallback to shared if not defined
+    learning_rate = algo_cfg.get("learning_rate", shared_cfg.get("learning_rate", 0.1))
 
     # Build agent based on selected algorithm
     match Algorithm_name:

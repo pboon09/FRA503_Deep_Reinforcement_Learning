@@ -45,3 +45,20 @@ python scripts/RL_Algorithm/visualize/plot_training.py \
            "logs/Stabilize/Double_Q_Learning/training_log_*.csv" \
     --output figures/ --show
 ```
+
+### Visualize Q-Table (3D Surface + Policy Heatmap)
+
+```bash
+# Single algorithm
+python scripts/RL_Algorithm/visualize/plot_q_surface.py \
+    --qtable "q_value/Stabilize/Q_Learning/Q_Learning_10000_*.json" \
+    --output figures/
+
+# Compare all algorithms
+python scripts/RL_Algorithm/visualize/plot_q_surface.py \
+    --qtable "q_value/Stabilize/MC/MC_10000_*.json" \
+             "q_value/Stabilize/SARSA/SARSA_10000_*.json" \
+             "q_value/Stabilize/Q_Learning/Q_Learning_10000_*.json" \
+             "q_value/Stabilize/Double_Q_Learning/Double_Q_Learning_10000_*.json" \
+    --output figures/ --show
+```
