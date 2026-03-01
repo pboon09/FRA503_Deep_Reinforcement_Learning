@@ -290,6 +290,91 @@ def save_v_heatmap(out_dir: str, label: str, qtable: dict):
     print(f"  Saved: {path}")
 
 
+def save_report_policy_comparison(out_dir: str, datasets: list[tuple[str, dict]]):
+    """2x2 subplot: policy heatmap (angle × velocity) for each algorithm."""
+    n = len(datasets)
+    ncols = min(n, 2)
+    nrows = (n + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows, ncols, figsize=(7 * ncols, 5 * nrows))
+    fig.suptitle("Learned Policy Comparison (Pole Angle × Angular Velocity)",
+                 fontsize=14, fontweight="bold")
+
+    if n == 1:
+        axes = np.array([[axes]])
+    elif nrows == 1:
+        axes = axes.reshape(1, -1)
+
+    for idx, (label, qtable) in enumerate(datasets):
+        r, c = divmod(idx, ncols)
+        ax = axes[r, c]
+        ax.set_facecolor("#d9d9d9")
+        xs, ys, force_grid, a_range = aggregate_policy(
+            qtable, DIM_POLE_ANG, DIM_POLE_VEL)
+        if xs.size == 0:
+            ax.text(0.5, 0.5, "No data", ha="center", va="center",
+                    transform=ax.transAxes)
+        else:
+            cmap_obj = cm.get_cmap("RdYlGn")
+            im = ax.pcolormesh(xs, ys, force_grid, cmap=cmap_obj,
+                               vmin=a_range[0], vmax=a_range[1])
+            fig.colorbar(im, ax=ax, label="Force (N)")
+        ax.set_xlabel("Pole Angle")
+        ax.set_ylabel("Pole Angular Velocity")
+        ax.set_title(label)
+
+    # Hide unused axes
+    for idx in range(n, nrows * ncols):
+        r, c = divmod(idx, ncols)
+        axes[r, c].set_visible(False)
+
+    fig.tight_layout()
+    path = os.path.join(out_dir, "report_policy_comparison.png")
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: {path}")
+
+
+def save_report_value_comparison(out_dir: str, datasets: list[tuple[str, dict]]):
+    """2x2 subplot: V(s) heatmap (angle × velocity) for each algorithm."""
+    import seaborn as sns
+    n = len(datasets)
+    ncols = min(n, 2)
+    nrows = (n + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows, ncols, figsize=(7 * ncols, 5 * nrows))
+    fig.suptitle("Value Function Comparison V(s) = max Q(s,a)",
+                 fontsize=14, fontweight="bold")
+
+    if n == 1:
+        axes = np.array([[axes]])
+    elif nrows == 1:
+        axes = axes.reshape(1, -1)
+
+    for idx, (label, qtable) in enumerate(datasets):
+        r, c = divmod(idx, ncols)
+        ax = axes[r, c]
+        xs, ys, v_grid = aggregate_v_surface(qtable, DIM_POLE_ANG, DIM_POLE_VEL)
+        if xs.size == 0:
+            ax.text(0.5, 0.5, "No data", ha="center", va="center",
+                    transform=ax.transAxes)
+        else:
+            v_filled = np.nan_to_num(v_grid, nan=0.0)
+            im = ax.pcolormesh(xs, ys, v_filled, cmap="viridis")
+            fig.colorbar(im, ax=ax, label="V(s)")
+        ax.set_xlabel("Pole Angle")
+        ax.set_ylabel("Pole Angular Velocity")
+        ax.set_title(label)
+
+    for idx in range(n, nrows * ncols):
+        r, c = divmod(idx, ncols)
+        axes[r, c].set_visible(False)
+
+    fig.tight_layout()
+    path = os.path.join(out_dir, "report_value_comparison.png")
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: {path}")
+
+
 def save_comparison_surface(out_dir: str, datasets: list[tuple[str, dict]]):
     """Side-by-side 3D surfaces for multiple algorithms."""
     n = len(datasets)
@@ -391,15 +476,16 @@ def main():
         print(f"\n[{label}] → {algo_dir}/")
         save_3d_surface(algo_dir, label, qtable)
         save_v_heatmap(algo_dir, label, qtable)
-        save_policy_heatmap_angle_pos(algo_dir, label, qtable)
         save_policy_heatmap_angle_vel(algo_dir, label, qtable)
 
-    # Comparison plot (if multiple)
+    # Comparison plots (if multiple)
     if len(datasets) > 1:
         cmp_dir = os.path.join(args.output, "comparison")
         os.makedirs(cmp_dir, exist_ok=True)
         print(f"\n[comparison] → {cmp_dir}/")
         save_comparison_surface(cmp_dir, datasets)
+        save_report_policy_comparison(cmp_dir, datasets)
+        save_report_value_comparison(cmp_dir, datasets)
 
     print("\nDone.")
 

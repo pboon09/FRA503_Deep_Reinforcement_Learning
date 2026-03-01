@@ -319,15 +319,15 @@ def save_episode_reward(out_dir: str, datasets, window: int):
     print(f"  Saved: {path}")
 
 
-def save_episode_length(out_dir: str, datasets, window: int, num_envs: int = 256):
+def save_episode_length(out_dir: str, datasets, window: int):
     fig, ax = plt.subplots(figsize=(10, 5))
     smooth_w = max(1, window // 20)
     for i, (label, df) in enumerate(datasets):
         ep = episode_blocks(df)
         s = rolling_mean(ep["steps"], smooth_w)
-        ax.plot(ep["episode"] * num_envs, s, label=label, linewidth=1.8, color=_color(i))
+        ax.plot(ep["episode"], s, label=label, linewidth=1.8, color=_color(i))
     ax.set_title("Episode Length")
-    ax.set_xlabel("Global Episode")
+    ax.set_xlabel("Episode (env 0)")
     ax.set_ylabel("Steps")
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -436,16 +436,16 @@ def save_td_error(out_dir: str, datasets, window: int):
     print(f"  Saved: {path}")
 
 
-def save_pole_variance(out_dir: str, datasets, window: int, num_envs: int = 256):
+def save_pole_variance(out_dir: str, datasets, window: int):
     """Variance of pole_angle per episode block — direct control quality metric."""
     fig, ax = plt.subplots(figsize=(10, 5))
     smooth_w = max(1, window // 20)
     for i, (label, df) in enumerate(datasets):
         ep = episode_blocks(df)
         s = rolling_mean(ep["var_pole_angle"].fillna(0), smooth_w)
-        ax.plot(ep["episode"] * num_envs, s, label=label, linewidth=1.8, color=_color(i))
+        ax.plot(ep["episode"], s, label=label, linewidth=1.8, color=_color(i))
     ax.set_title("Pole Angle Variance per Episode")
-    ax.set_xlabel("Global Episode")
+    ax.set_xlabel("Episode (env 0)")
     ax.set_ylabel("Variance of Pole Angle (rad²)")
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -476,8 +476,8 @@ def save_action_entropy(out_dir: str, datasets, num_envs: int = 256):
     print(f"  Saved: {path}")
 
 
-def save_origin_q_convergence(out_dir: str, datasets, num_envs: int = 256):
-    """Track max Q-value at the origin state (0,0,0,0) over global episodes.
+def save_origin_q_convergence(out_dir: str, datasets):
+    """Track max Q-value at the origin state (0,0,0,0) over episodes.
 
     The origin = pole upright, center, zero velocity.  Monotonic increase
     toward a plateau indicates convergence of the value estimate.
@@ -503,20 +503,138 @@ def save_origin_q_convergence(out_dir: str, datasets, num_envs: int = 256):
             continue
         any_data = True
         max_q = origin[q_cols].max(axis=1)
-        ep_global = origin["episode"] * num_envs
-        ax.plot(ep_global, max_q, label=label, linewidth=1.8, color=_color(i), alpha=0.8)
+        ax.plot(origin["episode"].values, max_q.values,
+                label=label, linewidth=1.8, color=_color(i), alpha=0.8)
 
     if not any_data:
         plt.close(fig)
         return
 
     ax.set_title("Q-Value Convergence at Origin State (0,0,0,0)")
-    ax.set_xlabel("Global Episode")
+    ax.set_xlabel("Episode (env 0)")
     ax.set_ylabel("max Q(s_origin, a)")
     ax.legend()
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
     path = os.path.join(out_dir, "origin_q_convergence.png")
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: {path}")
+
+
+def save_report_training(out_dir: str, datasets, window: int):
+    """Combined 2x2 subplot: reward, episode length, epsilon, state coverage."""
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle("Training Performance Comparison", fontsize=14, fontweight="bold")
+
+    # (a) Reward curve
+    ax = axes[0, 0]
+    for i, (label, df) in enumerate(datasets):
+        ax.plot(progress_pct(df), rolling_mean(df["reward"], window),
+                label=label, linewidth=1.5, color=_color(i))
+    ax.set_title("(a) Reward per Step")
+    ax.set_xlabel("Training Progress (%)")
+    ax.set_ylabel("Reward")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+
+    # (b) Episode length
+    ax = axes[0, 1]
+    smooth_w = max(1, window // 20)
+    for i, (label, df) in enumerate(datasets):
+        ep = episode_blocks(df)
+        ax.plot(ep["episode"], rolling_mean(ep["steps"], smooth_w),
+                label=label, linewidth=1.5, color=_color(i))
+    ax.set_title("(b) Episode Length")
+    ax.set_xlabel("Episode (env 0)")
+    ax.set_ylabel("Steps")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+
+    # (c) Epsilon decay
+    ax = axes[1, 0]
+    for i, (label, df) in enumerate(datasets):
+        ax.plot(progress_pct(df), df["epsilon"],
+                label=label, linewidth=1.5, color=_color(i))
+    ax.set_title("(c) Epsilon Decay")
+    ax.set_xlabel("Training Progress (%)")
+    ax.set_ylabel("Epsilon")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+
+    # (d) State coverage
+    ax = axes[1, 1]
+    state_cols = ["cart_pos_dis", "pole_angle_dis", "cart_vel_dis", "pole_vel_dis"]
+    for i, (label, df) in enumerate(datasets):
+        if not all(c in df.columns for c in state_cols):
+            continue
+        tuples = list(df[state_cols].itertuples(index=False, name=None))
+        seen: set = set()
+        cumulative = []
+        for t in tuples:
+            seen.add(t)
+            cumulative.append(len(seen))
+        ax.plot(progress_pct(df), cumulative,
+                label=label, linewidth=1.5, color=_color(i))
+    ax.set_title("(d) Cumulative Unique States")
+    ax.set_xlabel("Training Progress (%)")
+    ax.set_ylabel("Unique States")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+
+    fig.tight_layout()
+    path = os.path.join(out_dir, "report_training.png")
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: {path}")
+
+
+def save_report_qvalue(out_dir: str, datasets, window: int):
+    """Combined 1x2 subplot: max Q-value + origin Q convergence."""
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    fig.suptitle("Q-Value Analysis", fontsize=14, fontweight="bold")
+
+    # (a) Max Q-value
+    ax = axes[0]
+    for i, (label, df) in enumerate(datasets):
+        q_cols = get_q_cols(df)
+        if not q_cols:
+            continue
+        max_q = df[q_cols].max(axis=1)
+        ax.plot(progress_pct(df), rolling_mean(max_q, window),
+                label=label, linewidth=1.5, color=_color(i))
+    ax.set_title("(a) Max Q-value")
+    ax.set_xlabel("Training Progress (%)")
+    ax.set_ylabel("Max Q-value")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+
+    # (b) Origin state convergence
+    ax = axes[1]
+    state_cols = ["cart_pos_dis", "pole_angle_dis", "cart_vel_dis", "pole_vel_dis"]
+    for i, (label, df) in enumerate(datasets):
+        if not all(c in df.columns for c in state_cols):
+            continue
+        q_cols = get_q_cols(df)
+        if not q_cols:
+            continue
+        mask = (
+            (df["cart_pos_dis"] == 0) & (df["pole_angle_dis"] == 0) &
+            (df["cart_vel_dis"] == 0) & (df["pole_vel_dis"] == 0)
+        )
+        origin = df.loc[mask]
+        if origin.empty:
+            continue
+        ax.plot(origin["episode"].values, origin[q_cols].max(axis=1).values,
+                label=label, linewidth=1.5, color=_color(i), alpha=0.8)
+    ax.set_title("(b) Q-Value at Origin (0,0,0,0)")
+    ax.set_xlabel("Episode (env 0)")
+    ax.set_ylabel("max Q(s_origin, a)")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+
+    fig.tight_layout()
+    path = os.path.join(out_dir, "report_qvalue.png")
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  Saved: {path}")
@@ -569,10 +687,6 @@ def parse_args():
     p.add_argument(
         "--window", type=int, default=200, metavar="N",
         help="Rolling window size for smoothing (default: 200).",
-    )
-    p.add_argument(
-        "--num_envs", type=int, default=256, metavar="N",
-        help="Number of parallel envs (scales env-0 episodes to global count, default: 256).",
     )
     p.add_argument(
         "--gamma", type=float, default=GAMMA, metavar="G",
@@ -634,8 +748,6 @@ def main():
         cmp_dir = os.path.join(root, "comparison")
     os.makedirs(cmp_dir, exist_ok=True)
 
-    num_envs = args.num_envs
-
     # ── Per-algorithm individual plots ────────────────────────────────────
     for label, df in datasets:
         algo_dir = os.path.join(root, label)
@@ -648,13 +760,18 @@ def main():
     # ── Comparison / aggregate plots ─────────────────────────────────────
     print(f"\n[comparison] plots → {cmp_dir}/")
     save_reward_curve(cmp_dir, datasets, w)
-    save_episode_length(cmp_dir, datasets, w, num_envs)
+    save_episode_length(cmp_dir, datasets, w)
     save_epsilon(cmp_dir, datasets)
     save_action_distribution(cmp_dir, datasets)
     save_max_q(cmp_dir, datasets, w)
-    save_pole_variance(cmp_dir, datasets, w, num_envs)
+    save_pole_variance(cmp_dir, datasets, w)
     save_state_coverage(cmp_dir, datasets)
-    save_origin_q_convergence(cmp_dir, datasets, num_envs)
+    save_origin_q_convergence(cmp_dir, datasets)
+
+    # ── Combined report figures (compact subplots) ───────────────────────
+    print(f"\n[report] combined figures → {cmp_dir}/")
+    save_report_training(cmp_dir, datasets, w)
+    save_report_qvalue(cmp_dir, datasets, w)
 
     print("\nDone.")
 
