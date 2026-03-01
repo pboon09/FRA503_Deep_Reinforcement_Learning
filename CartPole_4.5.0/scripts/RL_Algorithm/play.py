@@ -1,28 +1,34 @@
-"""Script to play RL agent."""
+"""Script to evaluate a trained RL agent (deployment mode, epsilon=0)."""
 
 """Launch Isaac Sim Simulator first."""
 
 import argparse
 import sys
 import os
+import json
 
 from isaaclab.app import AppLauncher
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from RL_Algorithm.Algorithm.Q_Learning import Q_Learning
-from tqdm import tqdm
-
 # add argparse arguments
-parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
-parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
+parser = argparse.ArgumentParser(description="Evaluate a trained RL agent.")
+parser.add_argument("--video", action="store_true", default=False, help="Record videos during evaluation.")
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
 parser.add_argument("--video_interval", type=int, default=2000, help="Interval between video recordings (in steps).")
 parser.add_argument("--num_envs", type=int, default=1, help="Number of environments to simulate.")
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
 parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
 parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy training iterations.")
-
+parser.add_argument("--algorithm", type=str, default="Q_Learning",
+                    choices=["MC", "SARSA", "Q_Learning", "Double_Q_Learning"],
+                    help="Algorithm class to instantiate.")
+parser.add_argument("--qtable_path", type=str, required=True,
+                    help="Full path to Q-table JSON file.")
+parser.add_argument("--num_episodes", type=int, default=10,
+                    help="Number of evaluation episodes.")
+parser.add_argument("--output_csv", type=str, default="evaluation_results.csv",
+                    help="Path for evaluation results CSV (appended to).")
 
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
@@ -41,9 +47,10 @@ simulation_app = app_launcher.app
 
 """Rest everything follows."""
 
+import csv
 import gymnasium as gym
 import torch
-from datetime import datetime
+import numpy as np
 
 from isaaclab.envs import (
     DirectMARLEnv,
@@ -62,14 +69,12 @@ torch.backends.cudnn.allow_tf32 = True
 torch.backends.cudnn.deterministic = False
 torch.backends.cudnn.benchmark = False
 
-import numpy as np
-import matplotlib.pyplot as plt
 
 def main():
-    """Play with stable-baselines agent."""
+    """Evaluate a trained RL agent with pure exploitation (epsilon=0)."""
     # parse configuration
     env_cfg = parse_env_cfg(
-        args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs,  #use_fabric=not args_cli.disable_fabric
+        args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs,
     )
 
     # create isaac environment
@@ -78,46 +83,80 @@ def main():
     # ==================================================================== #
     # ========================= Can be modified ========================== #
 
-    num_of_action = None
-    action_range = [None, None]  # [min, max]
-    discretize_state_weight = [None, None, None, None]  # [pose_cart:int, pose_pole:int, vel_cart:int, vel_pole:int]
-    learning_rate = None
-    n_episodes = None
-    start_epsilon = None
-    epsilon_decay = None  # reduce the exploration over time
-    final_epsilon = None
-    discount = None
+    # Load hyperparameters from rl_config.json
+    config_path = os.path.join(os.path.dirname(__file__), "configs", "rl_config.json")
+    with open(config_path, "r") as f:
+        full_cfg = json.load(f)
 
-    agent = Q_Learning(
-        num_of_action=num_of_action,
-        action_range=action_range,
-        discretize_state_weight=discretize_state_weight,
-        learning_rate=learning_rate,
-        initial_epsilon=start_epsilon,
-        epsilon_decay=epsilon_decay,
-        final_epsilon=final_epsilon,
-        discount_factor=discount
-    )
+    shared_cfg = full_cfg["shared"]
+    algo_cfg = full_cfg["algorithms"].get(args_cli.algorithm, {})
 
-    task_name = str(args_cli.task).split('-')[0]  # Stabilize, SwingUp
-    Algorithm_name = "Q_Learning"  
-    episode = 0
-    q_value_file = f"{Algorithm_name}_{episode}_{num_of_action}_{action_range[1]}_{discretize_state_weight[0]}_{discretize_state_weight[1]}.json"
-    full_path = os.path.join(f"q_value/{task_name}", Algorithm_name)
-    agent.load_q_value(full_path, q_value_file)
+    num_of_action           = shared_cfg["num_of_action"]
+    action_range            = shared_cfg["action_range"]
+    discretize_state_weight = shared_cfg["discretize_state_weight"]
+    discount                = shared_cfg["discount"]
+    learning_rate = algo_cfg.get("learning_rate", shared_cfg.get("learning_rate", 0.1))
 
-    # reset environment
-    obs, _ = env.reset()
-    timestep = 0
-    # simulate environment
+    Algorithm_name = args_cli.algorithm
+
+    # Build agent with epsilon=0 (pure exploitation)
+    match Algorithm_name:
+        case "MC":
+            from RL_Algorithm.Algorithm.MC import MC
+            agent = MC(
+                num_of_action=num_of_action, action_range=action_range,
+                discretize_state_weight=discretize_state_weight,
+                learning_rate=learning_rate,
+                initial_epsilon=0.0, epsilon_decay=0.0, final_epsilon=0.0,
+                discount_factor=discount,
+            )
+        case "SARSA":
+            from RL_Algorithm.Algorithm.SARSA import SARSA
+            agent = SARSA(
+                num_of_action=num_of_action, action_range=action_range,
+                discretize_state_weight=discretize_state_weight,
+                learning_rate=learning_rate,
+                initial_epsilon=0.0, epsilon_decay=0.0, final_epsilon=0.0,
+                discount_factor=discount,
+            )
+        case "Q_Learning":
+            from RL_Algorithm.Algorithm.Q_Learning import Q_Learning
+            agent = Q_Learning(
+                num_of_action=num_of_action, action_range=action_range,
+                discretize_state_weight=discretize_state_weight,
+                learning_rate=learning_rate,
+                initial_epsilon=0.0, epsilon_decay=0.0, final_epsilon=0.0,
+                discount_factor=discount,
+            )
+        case "Double_Q_Learning":
+            from RL_Algorithm.Algorithm.Double_Q_Learning import Double_Q_Learning
+            agent = Double_Q_Learning(
+                num_of_action=num_of_action, action_range=action_range,
+                discretize_state_weight=discretize_state_weight,
+                learning_rate=learning_rate,
+                initial_epsilon=0.0, epsilon_decay=0.0, final_epsilon=0.0,
+                discount_factor=discount,
+            )
+
+    # Force 100% exploitation regardless of config
+    agent.epsilon = 0.0
+
+    # Load Q-table
+    qtable_dir = os.path.dirname(args_cli.qtable_path)
+    qtable_file = os.path.basename(args_cli.qtable_path)
+    agent.load_q_value(qtable_dir, qtable_file)
+
+    # Run evaluation episodes
+    episode_rewards = []
+    episode_lengths = []
+
     while simulation_app.is_running():
-        # run everything in inference mode
         with torch.inference_mode():
-        
-            for episode in range(n_episodes):
-
+            for ep in range(args_cli.num_episodes):
                 obs, _ = env.reset()
                 done = False
+                ep_reward = 0.0
+                ep_steps = 0
 
                 while not done:
                     # agent stepping
@@ -126,17 +165,45 @@ def main():
                     # env stepping
                     next_obs, reward, terminated, truncated, _ = env.step(action)
 
-                    done = terminated or truncated
+                    done = bool(terminated.item()) or bool(truncated.item())
+                    ep_reward += float(reward.item())
+                    ep_steps += 1
                     obs = next_obs
-        
 
-        if args_cli.video:
-            timestep += 1
-            # Exit the play loop after recording one video
-            if timestep == args_cli.video_length:
-                break
+                episode_rewards.append(ep_reward)
+                episode_lengths.append(ep_steps)
+                print(f"  Episode {ep+1}/{args_cli.num_episodes}: "
+                      f"reward={ep_reward:.2f}, length={ep_steps}")
+
+        break  # Exit simulation_app.is_running() loop after evaluation
 
     # ==================================================================== #
+
+    # Compute and print summary
+    mean_reward = float(np.mean(episode_rewards))
+    mean_length = float(np.mean(episode_lengths))
+    print(f"\nEvaluation Summary ({Algorithm_name}):")
+    print(f"  mean_reward = {mean_reward:.2f}")
+    print(f"  mean_length = {mean_length:.1f}")
+
+    # Append results to output CSV
+    csv_path = args_cli.output_csv
+    file_exists = os.path.isfile(csv_path)
+    with open(csv_path, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=[
+            "algorithm", "qtable_path", "num_episodes",
+            "mean_reward", "mean_length",
+        ])
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow({
+            "algorithm": Algorithm_name,
+            "qtable_path": args_cli.qtable_path,
+            "num_episodes": args_cli.num_episodes,
+            "mean_reward": mean_reward,
+            "mean_length": mean_length,
+        })
+    print(f"Results appended to: {csv_path}")
 
     # close the simulator
     env.close()
