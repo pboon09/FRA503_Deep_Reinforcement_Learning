@@ -50,11 +50,19 @@ def load_qtable(path: str) -> dict[tuple, list[float]]:
 
 
 def label_from_path(path: str) -> str:
-    """Extract algorithm name from Q-table path."""
+    """Extract algorithm name from Q-table path.
+
+    Prefers the filename stem (e.g. 'MC' from 'MC.json').
+    Falls back to parent directory if the stem contains underscores with digits
+    (like the auto-generated Q-table filenames).
+    """
+    stem = Path(path).stem
     parts = Path(path).parts
-    if len(parts) >= 3:
+    # Auto-generated names look like "MC_10000_100_10.0_1_8" — use parent dir
+    # Manually named files like "MC.json" — use the stem
+    if len(parts) >= 3 and sum(c.isdigit() for c in stem) > len(stem) // 2:
         return parts[-2]
-    return Path(path).stem
+    return stem
 
 
 # ─────────────────────────────────────────────────────────────────────────────

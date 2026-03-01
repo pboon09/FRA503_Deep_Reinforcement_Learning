@@ -258,6 +258,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     global_step      = 0
     train_start_time = time.time()               # for FPS calculation
     recent_actions   = []                        # env-0 action_idx buffer for entropy estimate
+    env_0_episodes   = 0                         # local episode counter for env 0 only
 
     # MC: per-env episode histories (agent's single-list histories won't work for multi-env)
     if Algorithm_name == "MC":
@@ -414,7 +415,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
                     # Log only env 0 every step to keep CSV size manageable
                     if i == 0:
-                        log_step(total_episodes, global_step, obs_i,
+                        if done_i:
+                            env_0_episodes += 1
+                        log_step(env_0_episodes, global_step, obs_i,
                                  obs_dis_list[i], action_indices[i], action_vals[i], r_i)
                         recent_actions.append(action_indices[i])
 

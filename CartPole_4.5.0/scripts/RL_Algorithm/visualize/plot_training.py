@@ -38,11 +38,18 @@ GAMMA = 0.99   # discount factor used for TD-error approximation
 # ─────────────────────────────────────────────────────────────────────────────
 
 def label_from_path(path: str) -> str:
-    """Extract algorithm name from the CSV path (second-to-last directory)."""
+    """Extract algorithm name from the CSV path.
+
+    Prefers the filename stem (e.g. 'MC' from 'MC.csv').
+    Falls back to parent directory if the stem starts with 'training_log'.
+    """
+    stem = Path(path).stem
+    if not stem.startswith("training_log"):
+        return stem
     parts = Path(path).parts
     if len(parts) >= 3:
         return parts[-2]
-    return Path(path).stem
+    return stem
 
 
 def load_csv(path: str) -> pd.DataFrame:
@@ -256,7 +263,7 @@ def save_reward_curve(out_dir: str, datasets, window: int):
     fig, ax = plt.subplots(figsize=(10, 5))
     for i, (label, df) in enumerate(datasets):
         s = rolling_mean(df["reward"], window)
-        ax.plot(df["step"], s, label=label, linewidth=1.2, color=_color(i))
+        ax.plot(df["step"], s, label=label, linewidth=2.5, color=_color(i))
     ax.set_title("Reward per Step")
     ax.set_xlabel("Global Step")
     ax.set_ylabel("Reward")
@@ -276,7 +283,7 @@ def save_episode_reward(out_dir: str, datasets, window: int):
     for i, (label, df) in enumerate(datasets):
         ep = episode_blocks(df)
         s = rolling_mean(ep["sum_reward"], smooth_w)
-        ax.plot(ep.index, s, label=label, linewidth=1.2, color=_color(i))
+        ax.plot(ep.index, s, label=label, linewidth=2.5, color=_color(i))
     ax.set_title("Episode Total Reward")
     ax.set_xlabel("Episode Block")
     ax.set_ylabel("Total Reward")
@@ -295,7 +302,7 @@ def save_episode_length(out_dir: str, datasets, window: int):
     for i, (label, df) in enumerate(datasets):
         ep = episode_blocks(df)
         s = rolling_mean(ep["steps"], smooth_w)
-        ax.plot(ep.index, s, label=label, linewidth=1.2, color=_color(i))
+        ax.plot(ep.index, s, label=label, linewidth=2.5, color=_color(i))
     ax.set_title("Episode Length")
     ax.set_xlabel("Episode Block")
     ax.set_ylabel("Steps")
@@ -311,7 +318,7 @@ def save_episode_length(out_dir: str, datasets, window: int):
 def save_epsilon(out_dir: str, datasets):
     fig, ax = plt.subplots(figsize=(10, 4))
     for i, (label, df) in enumerate(datasets):
-        ax.plot(df["step"], df["epsilon"], label=label, linewidth=1.2, color=_color(i))
+        ax.plot(df["step"], df["epsilon"], label=label, linewidth=2.5, color=_color(i))
     ax.set_title("Epsilon Decay")
     ax.set_xlabel("Global Step")
     ax.set_ylabel("Epsilon")
@@ -349,7 +356,7 @@ def save_max_q(out_dir: str, datasets, window: int):
             continue
         max_q = df[q_cols].max(axis=1)
         ax.plot(df["step"], rolling_mean(max_q, window),
-                label=label, linewidth=1.2, color=_color(i))
+                label=label, linewidth=2.5, color=_color(i))
     ax.set_title("Max Q-value")
     ax.set_xlabel("Global Step")
     ax.set_ylabel("Max Q-value")
@@ -371,7 +378,7 @@ def save_q_spread(out_dir: str, datasets, window: int):
             continue
         spread = df[q_cols].max(axis=1) - df[q_cols].min(axis=1)
         ax.plot(df["step"], rolling_mean(spread, window),
-                label=label, linewidth=1.2, color=_color(i))
+                label=label, linewidth=2.5, color=_color(i))
     ax.set_title("Q-value Spread (max − min)")
     ax.set_xlabel("Global Step")
     ax.set_ylabel("Q-value Spread")
@@ -393,7 +400,7 @@ def save_td_error(out_dir: str, datasets, window: int):
             continue
         step_idx = df["step"].iloc[td.index]
         ax.plot(step_idx, rolling_mean(td, window),
-                label=label, linewidth=1.2, color=_color(i))
+                label=label, linewidth=2.5, color=_color(i))
     ax.set_title("TD Error")
     ax.set_xlabel("Global Step")
     ax.set_ylabel("TD Error")
@@ -413,7 +420,7 @@ def save_pole_variance(out_dir: str, datasets, window: int):
     for i, (label, df) in enumerate(datasets):
         ep = episode_blocks(df)
         s = rolling_mean(ep["var_pole_angle"].fillna(0), smooth_w)
-        ax.plot(ep.index, s, label=label, linewidth=1.2, color=_color(i))
+        ax.plot(ep.index, s, label=label, linewidth=2.5, color=_color(i))
     ax.set_title("Pole Angle Variance per Episode")
     ax.set_xlabel("Episode Block")
     ax.set_ylabel("Variance of Pole Angle (rad²)")
@@ -432,7 +439,7 @@ def save_action_entropy(out_dir: str, datasets):
     for i, (label, df) in enumerate(datasets):
         ent = action_entropy_per_block(df)
         ax.plot(ent.index, rolling_mean(ent, max(1, len(ent) // 100)),
-                label=label, linewidth=1.2, color=_color(i))
+                label=label, linewidth=2.5, color=_color(i))
     ax.set_title("Action Entropy per Episode")
     ax.set_xlabel("Episode Block")
     ax.set_ylabel("Entropy (nats)")
@@ -458,7 +465,7 @@ def save_state_coverage(out_dir: str, datasets):
             seen.add(t)
             cumulative.append(len(seen))
         ax.plot(df["step"].values, cumulative,
-                label=label, linewidth=1.2, color=_color(i))
+                label=label, linewidth=2.5, color=_color(i))
     ax.set_title("Cumulative Unique States Visited")
     ax.set_xlabel("Global Step")
     ax.set_ylabel("Unique States")
