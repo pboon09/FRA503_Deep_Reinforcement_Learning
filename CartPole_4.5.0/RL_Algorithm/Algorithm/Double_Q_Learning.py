@@ -42,7 +42,11 @@ class Double_Q_Learning(BaseAlgorithm):
     def update(
         self,
         #========= put your code here =========#
-
+        obs_dis,
+        action,
+        reward,
+        next_obs_dis,
+        done,
         
     ):
         """
@@ -50,5 +54,28 @@ class Double_Q_Learning(BaseAlgorithm):
 
         This method applies the Double Q-Learning update rule to improve policy decisions by updating the Q-table.
         """
-        pass
+        if np.random.rand() < 0.5:
+            # Update QA using QB for evaluation
+            if done:
+                target = reward
+            else:
+                best_next_action_a = np.argmax(self.qa_values[next_obs_dis])
+                target = reward + self.discount_factor * self.qb_values[next_obs_dis][best_next_action_a]
+            
+            td_error = target - self.qa_values[obs_dis][action]
+            self.qa_values[obs_dis][action] += self.lr * td_error
+        else:
+            # Update QB using QA for evaluation
+            if done:
+                target = reward
+            else:
+                best_next_action_b = np.argmax(self.qb_values[next_obs_dis])
+                target = reward + self.discount_factor * self.qa_values[next_obs_dis][best_next_action_b]
+            
+            td_error = target - self.qb_values[obs_dis][action]
+            self.qb_values[obs_dis][action] += self.lr * td_error
+            
+        # Synchronize primary q_values table for epsilon-greedy action selection in BaseAlgorithm
+        self.q_values[obs_dis][action] = (self.qa_values[obs_dis][action] + self.qb_values[obs_dis][action]) / 2.0
+        self.training_error.append(abs(td_error))
         #======================================#
