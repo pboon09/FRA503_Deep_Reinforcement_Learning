@@ -5,7 +5,7 @@
         "discretize_state_weight": [1, 8, 1, 8],
         "n_episodes": 10000,
         "start_epsilon": 1.0,
-        "epsilon_decay": 0.9999,
+        "epsilon_decay": 0.999,
         "final_epsilon": 0.01,
         "discount": 0.99
     },
