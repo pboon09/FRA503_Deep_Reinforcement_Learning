@@ -1,8 +1,16 @@
 {
     "shared": {
         "num_of_action": 5,
-        "action_range": [-5.0, 5.0],
-        "discretize_state_weight": [1, 8, 1, 8],
+        "action_range": [
+            -5.0,
+            5.0
+        ],
+        "discretize_state_weight": [
+            1,
+            8,
+            1,
+            8
+        ],
         "n_episodes": 10000,
         "start_epsilon": 1.0,
         "epsilon_decay": 0.999,
@@ -10,9 +18,17 @@
         "discount": 0.99
     },
     "algorithms": {
-        "MC": { "learning_rate": 0.05 },
-        "SARSA": { "learning_rate": 0.1 },
-        "Q_Learning": { "learning_rate": 0.1 },
-        "Double_Q_Learning": { "learning_rate": 0.1 }
+        "MC": {
+            "learning_rate": 0.05
+        },
+        "SARSA": {
+            "learning_rate": 0.1
+        },
+        "Q_Learning": {
+            "learning_rate": 0.1
+        },
+        "Double_Q_Learning": {
+            "learning_rate": 0.1
+        }
     }
 }
