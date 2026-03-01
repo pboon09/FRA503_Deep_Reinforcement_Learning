@@ -1,8 +1,8 @@
 {
     "shared": {
-        "num_of_action": 2,
-        "action_range": [-1.0, 1.0],
-        "discretize_state_weight": [10, 10, 10, 10],
+        "num_of_action": 100,
+        "action_range": [-10.0, 10.0],
+        "discretize_state_weight": [1, 8, 1, 8],
         "n_episodes": 10000,
         "start_epsilon": 1.0,
         "epsilon_decay": 0.9999,
