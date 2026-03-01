@@ -1,0 +1,18 @@
+{
+    "shared": {
+        "num_of_action": 2,
+        "action_range": [-1.0, 1.0],
+        "discretize_state_weight": [10, 10, 10, 10],
+        "n_episodes": 10000,
+        "start_epsilon": 1.0,
+        "epsilon_decay": 0.9999,
+        "final_epsilon": 0.01,
+        "discount": 0.99
+    },
+    "algorithms": {
+        "MC": { "learning_rate": 0.05 },
+        "SARSA": { "learning_rate": 0.1 },
+        "Q_Learning": { "learning_rate": 0.1 },
+        "Double_Q_Learning": { "learning_rate": 0.1 }
+    }
+}
