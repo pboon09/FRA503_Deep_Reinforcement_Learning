@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Automated HW2 experiment runner.
 
-Trains all 4 baseline algorithms, collects logs, and generates comparison plots:
+Trains all 4 baseline algorithms, collects logs + Q-tables, and generates
+both training plots and Q-value surface/policy plots:
 
     python run_experiments.py
 """
@@ -19,6 +20,7 @@ import sys
 ROOT = os.path.dirname(os.path.abspath(__file__))
 TRAIN_SCRIPT = os.path.join(ROOT, "scripts", "RL_Algorithm", "train.py")
 PLOT_TRAINING = os.path.join(ROOT, "scripts", "RL_Algorithm", "visualize", "plot_training.py")
+PLOT_Q_SURFACE = os.path.join(ROOT, "scripts", "RL_Algorithm", "visualize", "plot_q_surface.py")
 EXPERIMENTS_DIR = os.path.join(ROOT, "experiments", "baseline_test")
 FIGURES_DIR = os.path.join(ROOT, "figures", "baseline_test")
 
@@ -73,6 +75,20 @@ def collect_csv(algo: str):
     return dest
 
 
+def collect_qtable(algo: str):
+    """Copy the newest Q-table JSON to experiments/baseline_test/{algo}.json."""
+    src_dir = os.path.join(ROOT, "q_value", TASK_SHORT, algo)
+    newest = find_newest(src_dir, "*.json")
+    if newest is None:
+        print(f"  WARNING: No Q-table found in {src_dir}")
+        return None
+    os.makedirs(EXPERIMENTS_DIR, exist_ok=True)
+    dest = os.path.join(EXPERIMENTS_DIR, f"{algo}.json")
+    shutil.copy2(newest, dest)
+    print(f"  {os.path.basename(newest)} -> {dest}")
+    return dest
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
@@ -86,6 +102,7 @@ def main():
     print("=" * 60)
 
     csv_paths = []
+    qtable_paths = []
 
     for algo in ALL_ALGOS:
         ok = train(algo)
@@ -93,15 +110,28 @@ def main():
             print(f"  ERROR: {algo} training failed, skipping.")
             continue
         csv = collect_csv(algo)
+        qt = collect_qtable(algo)
         if csv:
             csv_paths.append(csv)
+        if qt:
+            qtable_paths.append(qt)
 
-    # Generate comparison plots
+    # Generate training comparison plots
     if csv_paths:
         os.makedirs(FIGURES_DIR, exist_ok=True)
         cmd = [sys.executable, PLOT_TRAINING, "--logs"] + csv_paths + ["--output", FIGURES_DIR]
         print(f"\n{'='*60}")
-        print(f"  PLOTTING -> {FIGURES_DIR}/")
+        print(f"  PLOT TRAINING -> {FIGURES_DIR}/")
+        print(f"{'='*60}\n")
+        subprocess.run(cmd, cwd=ROOT)
+
+    # Generate Q-value surface + policy plots
+    if qtable_paths:
+        q_fig_dir = os.path.join(FIGURES_DIR, "q_surface")
+        os.makedirs(q_fig_dir, exist_ok=True)
+        cmd = [sys.executable, PLOT_Q_SURFACE, "--qtable"] + qtable_paths + ["--output", q_fig_dir]
+        print(f"\n{'='*60}")
+        print(f"  PLOT Q-SURFACE -> {q_fig_dir}/")
         print(f"{'='*60}\n")
         subprocess.run(cmd, cwd=ROOT)
 

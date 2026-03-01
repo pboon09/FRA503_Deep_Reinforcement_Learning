@@ -66,6 +66,14 @@ def rolling_mean(s: pd.Series, w: int) -> pd.Series:
     return s.rolling(w, min_periods=1).mean()
 
 
+def progress_pct(df: pd.DataFrame) -> np.ndarray:
+    """Return 0–100 % array based on row position (normalises different-length runs)."""
+    n = len(df)
+    if n <= 1:
+        return np.zeros(n)
+    return np.linspace(0, 100, n)
+
+
 def episode_blocks(df: pd.DataFrame) -> pd.DataFrame:
     """Group consecutive rows that share the same episode value.
 
@@ -263,9 +271,9 @@ def save_reward_curve(out_dir: str, datasets, window: int):
     fig, ax = plt.subplots(figsize=(10, 5))
     for i, (label, df) in enumerate(datasets):
         s = rolling_mean(df["reward"], window)
-        ax.plot(df["step"], s, label=label, linewidth=2.5, color=_color(i))
+        ax.plot(progress_pct(df), s, label=label, linewidth=1.8, color=_color(i))
     ax.set_title("Reward per Step")
-    ax.set_xlabel("Global Step")
+    ax.set_xlabel("Training Progress (%)")
     ax.set_ylabel("Reward")
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -283,9 +291,9 @@ def save_episode_reward(out_dir: str, datasets, window: int):
     for i, (label, df) in enumerate(datasets):
         ep = episode_blocks(df)
         s = rolling_mean(ep["sum_reward"], smooth_w)
-        ax.plot(ep.index, s, label=label, linewidth=2.5, color=_color(i))
+        ax.plot(ep["episode"], s, label=label, linewidth=1.8, color=_color(i))
     ax.set_title("Episode Total Reward")
-    ax.set_xlabel("Episode Block")
+    ax.set_xlabel("Episode")
     ax.set_ylabel("Total Reward")
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -302,9 +310,9 @@ def save_episode_length(out_dir: str, datasets, window: int):
     for i, (label, df) in enumerate(datasets):
         ep = episode_blocks(df)
         s = rolling_mean(ep["steps"], smooth_w)
-        ax.plot(ep.index, s, label=label, linewidth=2.5, color=_color(i))
+        ax.plot(ep["episode"], s, label=label, linewidth=1.8, color=_color(i))
     ax.set_title("Episode Length")
-    ax.set_xlabel("Episode Block")
+    ax.set_xlabel("Episode")
     ax.set_ylabel("Steps")
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -318,9 +326,9 @@ def save_episode_length(out_dir: str, datasets, window: int):
 def save_epsilon(out_dir: str, datasets):
     fig, ax = plt.subplots(figsize=(10, 4))
     for i, (label, df) in enumerate(datasets):
-        ax.plot(df["step"], df["epsilon"], label=label, linewidth=2.5, color=_color(i))
+        ax.plot(progress_pct(df), df["epsilon"], label=label, linewidth=1.8, color=_color(i))
     ax.set_title("Epsilon Decay")
-    ax.set_xlabel("Global Step")
+    ax.set_xlabel("Training Progress (%)")
     ax.set_ylabel("Epsilon")
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -355,10 +363,10 @@ def save_max_q(out_dir: str, datasets, window: int):
         if not q_cols:
             continue
         max_q = df[q_cols].max(axis=1)
-        ax.plot(df["step"], rolling_mean(max_q, window),
-                label=label, linewidth=2.5, color=_color(i))
+        ax.plot(progress_pct(df), rolling_mean(max_q, window),
+                label=label, linewidth=1.8, color=_color(i))
     ax.set_title("Max Q-value")
-    ax.set_xlabel("Global Step")
+    ax.set_xlabel("Training Progress (%)")
     ax.set_ylabel("Max Q-value")
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -377,10 +385,10 @@ def save_q_spread(out_dir: str, datasets, window: int):
         if not q_cols:
             continue
         spread = df[q_cols].max(axis=1) - df[q_cols].min(axis=1)
-        ax.plot(df["step"], rolling_mean(spread, window),
-                label=label, linewidth=2.5, color=_color(i))
+        ax.plot(progress_pct(df), rolling_mean(spread, window),
+                label=label, linewidth=1.8, color=_color(i))
     ax.set_title("Q-value Spread (max − min)")
-    ax.set_xlabel("Global Step")
+    ax.set_xlabel("Training Progress (%)")
     ax.set_ylabel("Q-value Spread")
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -398,11 +406,11 @@ def save_td_error(out_dir: str, datasets, window: int):
         td = compute_td_error(df).dropna()
         if td.empty:
             continue
-        step_idx = df["step"].iloc[td.index]
-        ax.plot(step_idx, rolling_mean(td, window),
-                label=label, linewidth=2.5, color=_color(i))
+        pct_idx = progress_pct(df)[td.index]
+        ax.plot(pct_idx, rolling_mean(td, window),
+                label=label, linewidth=1.8, color=_color(i))
     ax.set_title("TD Error")
-    ax.set_xlabel("Global Step")
+    ax.set_xlabel("Training Progress (%)")
     ax.set_ylabel("TD Error")
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -420,9 +428,9 @@ def save_pole_variance(out_dir: str, datasets, window: int):
     for i, (label, df) in enumerate(datasets):
         ep = episode_blocks(df)
         s = rolling_mean(ep["var_pole_angle"].fillna(0), smooth_w)
-        ax.plot(ep.index, s, label=label, linewidth=2.5, color=_color(i))
+        ax.plot(ep["episode"], s, label=label, linewidth=1.8, color=_color(i))
     ax.set_title("Pole Angle Variance per Episode")
-    ax.set_xlabel("Episode Block")
+    ax.set_xlabel("Episode")
     ax.set_ylabel("Variance of Pole Angle (rad²)")
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -438,10 +446,11 @@ def save_action_entropy(out_dir: str, datasets):
     fig, ax = plt.subplots(figsize=(10, 5))
     for i, (label, df) in enumerate(datasets):
         ent = action_entropy_per_block(df)
-        ax.plot(ent.index, rolling_mean(ent, max(1, len(ent) // 100)),
-                label=label, linewidth=2.5, color=_color(i))
+        ep = episode_blocks(df)
+        ax.plot(ep["episode"], rolling_mean(ent, max(1, len(ent) // 100)),
+                label=label, linewidth=1.8, color=_color(i))
     ax.set_title("Action Entropy per Episode")
-    ax.set_xlabel("Episode Block")
+    ax.set_xlabel("Episode")
     ax.set_ylabel("Entropy (nats)")
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -464,10 +473,10 @@ def save_state_coverage(out_dir: str, datasets):
         for t in tuples:
             seen.add(t)
             cumulative.append(len(seen))
-        ax.plot(df["step"].values, cumulative,
-                label=label, linewidth=2.5, color=_color(i))
+        ax.plot(progress_pct(df), cumulative,
+                label=label, linewidth=1.8, color=_color(i))
     ax.set_title("Cumulative Unique States Visited")
-    ax.set_xlabel("Global Step")
+    ax.set_xlabel("Training Progress (%)")
     ax.set_ylabel("Unique States")
     ax.legend()
     ax.grid(True, alpha=0.3)
