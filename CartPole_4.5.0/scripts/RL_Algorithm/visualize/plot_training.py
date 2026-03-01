@@ -166,8 +166,13 @@ def save_state_heatmap(out_dir: str, label: str, df: pd.DataFrame):
     print(f"  Saved: {path}")
 
 
-def save_policy_heatmap(out_dir: str, label: str, df: pd.DataFrame):
-    """Learned policy heatmap: for each visited state, show argmax Q action."""
+def save_policy_heatmap(out_dir: str, label: str, df: pd.DataFrame,
+                        action_range: tuple[float, float] = (-10.0, 10.0)):
+    """Learned policy heatmap: for each visited state, show best force (N).
+
+    Unvisited states (all Q == 0) are masked and shown in gray.
+    Color encodes the mapped physical force, not the raw action index.
+    """
     q_cols = get_q_cols(df)
     if not q_cols:
         return
@@ -177,22 +182,32 @@ def save_policy_heatmap(out_dir: str, label: str, df: pd.DataFrame):
     if latest.empty:
         ax.text(0.5, 0.5, "No data", ha="center", va="center")
     else:
-        latest["best_action"] = latest[q_cols].values.argmax(axis=1)
-        pivot = latest.pivot(
-            index="pole_angle_dis", columns="cart_pos_dis", values="best_action"
-        )
         n_actions = len(q_cols)
-        cmap = cm.get_cmap("RdYlGn", n_actions)
+        a_min, a_max = action_range
+
+        # Mask unvisited states (all Q == 0)
+        q_vals = latest[q_cols].values
+        visited = np.abs(q_vals).sum(axis=1) > 0
+        best_idx = q_vals.argmax(axis=1).astype(float)
+        best_idx[~visited] = np.nan
+
+        # Map action index → physical force
+        latest["best_force"] = a_min + (a_max - a_min) * best_idx / max(n_actions - 1, 1)
+        pivot = latest.pivot(
+            index="pole_angle_dis", columns="cart_pos_dis", values="best_force"
+        )
+        ax.set_facecolor("#d9d9d9")      # gray background for unvisited
+        cmap = cm.get_cmap("RdYlGn")
         im = ax.pcolormesh(
             pivot.columns, pivot.index, pivot.values,
-            cmap=cmap, vmin=0, vmax=n_actions - 1,
+            cmap=cmap, vmin=a_min, vmax=a_max,
         )
         cb = fig.colorbar(im, ax=ax)
-        cb.set_label("Best action index (argmax Q)")
-        cb.set_ticks([0, n_actions // 2, n_actions - 1])
-        cb.set_ticklabels(["Push Left", "Zero", "Push Right"])
+        cb.set_label("Best Action Force (N)")
+        cb.set_ticks([a_min, 0, a_max])
+        cb.set_ticklabels([f"{a_min:.0f}N (Left)", "0N", f"{a_max:.0f}N (Right)"])
 
-    ax.set_title(f"Learned Policy (argmax Q) — {label}")
+    ax.set_title(f"Learned Policy — {label}")
     ax.set_xlabel("cart_pos_dis →")
     ax.set_ylabel("pole_angle_dis ↑")
     fig.tight_layout()
@@ -304,15 +319,15 @@ def save_episode_reward(out_dir: str, datasets, window: int):
     print(f"  Saved: {path}")
 
 
-def save_episode_length(out_dir: str, datasets, window: int):
+def save_episode_length(out_dir: str, datasets, window: int, num_envs: int = 256):
     fig, ax = plt.subplots(figsize=(10, 5))
     smooth_w = max(1, window // 20)
     for i, (label, df) in enumerate(datasets):
         ep = episode_blocks(df)
         s = rolling_mean(ep["steps"], smooth_w)
-        ax.plot(ep["episode"], s, label=label, linewidth=1.8, color=_color(i))
+        ax.plot(ep["episode"] * num_envs, s, label=label, linewidth=1.8, color=_color(i))
     ax.set_title("Episode Length")
-    ax.set_xlabel("Episode")
+    ax.set_xlabel("Global Episode")
     ax.set_ylabel("Steps")
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -421,16 +436,16 @@ def save_td_error(out_dir: str, datasets, window: int):
     print(f"  Saved: {path}")
 
 
-def save_pole_variance(out_dir: str, datasets, window: int):
+def save_pole_variance(out_dir: str, datasets, window: int, num_envs: int = 256):
     """Variance of pole_angle per episode block — direct control quality metric."""
     fig, ax = plt.subplots(figsize=(10, 5))
     smooth_w = max(1, window // 20)
     for i, (label, df) in enumerate(datasets):
         ep = episode_blocks(df)
         s = rolling_mean(ep["var_pole_angle"].fillna(0), smooth_w)
-        ax.plot(ep["episode"], s, label=label, linewidth=1.8, color=_color(i))
+        ax.plot(ep["episode"] * num_envs, s, label=label, linewidth=1.8, color=_color(i))
     ax.set_title("Pole Angle Variance per Episode")
-    ax.set_xlabel("Episode")
+    ax.set_xlabel("Global Episode")
     ax.set_ylabel("Variance of Pole Angle (rad²)")
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -441,21 +456,67 @@ def save_pole_variance(out_dir: str, datasets, window: int):
     print(f"  Saved: {path}")
 
 
-def save_action_entropy(out_dir: str, datasets):
+def save_action_entropy(out_dir: str, datasets, num_envs: int = 256):
     """Shannon entropy of action distribution per episode block."""
     fig, ax = plt.subplots(figsize=(10, 5))
     for i, (label, df) in enumerate(datasets):
         ent = action_entropy_per_block(df)
         ep = episode_blocks(df)
-        ax.plot(ep["episode"], rolling_mean(ent, max(1, len(ent) // 100)),
+        ax.plot(ep["episode"] * num_envs, rolling_mean(ent, max(1, len(ent) // 100)),
                 label=label, linewidth=1.8, color=_color(i))
     ax.set_title("Action Entropy per Episode")
-    ax.set_xlabel("Episode")
+    ax.set_xlabel("Global Episode")
     ax.set_ylabel("Entropy (nats)")
     ax.legend()
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
     path = os.path.join(out_dir, "action_entropy.png")
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: {path}")
+
+
+def save_origin_q_convergence(out_dir: str, datasets, num_envs: int = 256):
+    """Track max Q-value at the origin state (0,0,0,0) over global episodes.
+
+    The origin = pole upright, center, zero velocity.  Monotonic increase
+    toward a plateau indicates convergence of the value estimate.
+    """
+    state_cols = ["cart_pos_dis", "pole_angle_dis", "cart_vel_dis", "pole_vel_dis"]
+    fig, ax = plt.subplots(figsize=(10, 5))
+    any_data = False
+    for i, (label, df) in enumerate(datasets):
+        if not all(c in df.columns for c in state_cols):
+            continue
+        q_cols = get_q_cols(df)
+        if not q_cols:
+            continue
+        # Filter rows at origin state
+        mask = (
+            (df["cart_pos_dis"] == 0) &
+            (df["pole_angle_dis"] == 0) &
+            (df["cart_vel_dis"] == 0) &
+            (df["pole_vel_dis"] == 0)
+        )
+        origin = df.loc[mask].copy()
+        if origin.empty:
+            continue
+        any_data = True
+        max_q = origin[q_cols].max(axis=1)
+        ep_global = origin["episode"] * num_envs
+        ax.plot(ep_global, max_q, label=label, linewidth=1.8, color=_color(i), alpha=0.8)
+
+    if not any_data:
+        plt.close(fig)
+        return
+
+    ax.set_title("Q-Value Convergence at Origin State (0,0,0,0)")
+    ax.set_xlabel("Global Episode")
+    ax.set_ylabel("max Q(s_origin, a)")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    path = os.path.join(out_dir, "origin_q_convergence.png")
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  Saved: {path}")
@@ -508,6 +569,10 @@ def parse_args():
     p.add_argument(
         "--window", type=int, default=200, metavar="N",
         help="Rolling window size for smoothing (default: 200).",
+    )
+    p.add_argument(
+        "--num_envs", type=int, default=256, metavar="N",
+        help="Number of parallel envs (scales env-0 episodes to global count, default: 256).",
     )
     p.add_argument(
         "--gamma", type=float, default=GAMMA, metavar="G",
@@ -569,6 +634,8 @@ def main():
         cmp_dir = os.path.join(root, "comparison")
     os.makedirs(cmp_dir, exist_ok=True)
 
+    num_envs = args.num_envs
+
     # ── Per-algorithm individual plots ────────────────────────────────────
     for label, df in datasets:
         algo_dir = os.path.join(root, label)
@@ -577,21 +644,17 @@ def main():
         save_state_heatmap(algo_dir, label, df)
         save_policy_heatmap(algo_dir, label, df)
         save_state_trajectory(algo_dir, label, df)
-        save_phase_portrait(algo_dir, label, df)
 
     # ── Comparison / aggregate plots ─────────────────────────────────────
     print(f"\n[comparison] plots → {cmp_dir}/")
     save_reward_curve(cmp_dir, datasets, w)
-    save_episode_reward(cmp_dir, datasets, w)
-    save_episode_length(cmp_dir, datasets, w)
+    save_episode_length(cmp_dir, datasets, w, num_envs)
     save_epsilon(cmp_dir, datasets)
     save_action_distribution(cmp_dir, datasets)
     save_max_q(cmp_dir, datasets, w)
-    save_q_spread(cmp_dir, datasets, w)
-    save_td_error(cmp_dir, datasets, w)
-    save_pole_variance(cmp_dir, datasets, w)
-    save_action_entropy(cmp_dir, datasets)
+    save_pole_variance(cmp_dir, datasets, w, num_envs)
     save_state_coverage(cmp_dir, datasets)
+    save_origin_q_convergence(cmp_dir, datasets, num_envs)
 
     print("\nDone.")
 
