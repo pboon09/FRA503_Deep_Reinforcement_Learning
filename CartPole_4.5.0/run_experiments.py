@@ -4,8 +4,8 @@
 Executes 4 experimental suites, collects logs + Q-tables, and generates plots:
 
   Suite 1: Baseline       - all 4 algorithms with default config
-  Suite 2: Action Resol.  - all 4 algorithms with num_of_action = 5, 25, 50
-  Suite 3: State Resol.   - all 4 algorithms with different discretize_state_weight
+  Suite 2: Action Resol.  - all 4 algorithms with num_of_action = 3, 5, 11, 21
+  Suite 3: State Resol.   - all 4 algorithms with weights [1,4,1,4], [1,8,1,8], [2,16,2,16]
   Suite 4: Deployment     - play.py evaluation with epsilon=0, video recording, bar charts
 
     python run_experiments.py
@@ -28,6 +28,7 @@ PLAY_SCRIPT = os.path.join(ROOT, "scripts", "RL_Algorithm", "play.py")
 PLOT_TRAINING = os.path.join(ROOT, "scripts", "RL_Algorithm", "visualize", "plot_training.py")
 PLOT_Q_SURFACE = os.path.join(ROOT, "scripts", "RL_Algorithm", "visualize", "plot_q_surface.py")
 PLOT_DEPLOYMENT = os.path.join(ROOT, "scripts", "RL_Algorithm", "visualize", "plot_deployment.py")
+PLOT_ANALYSIS = os.path.join(ROOT, "scripts", "RL_Algorithm", "visualize", "plot_analysis.py")
 CONFIG_PATH = os.path.join(ROOT, "scripts", "RL_Algorithm", "configs", "rl_config.json")
 
 TASK = "Stabilize-Isaac-Cartpole-v0"
@@ -69,7 +70,8 @@ def train(algorithm: str) -> bool:
 
 def evaluate(algorithm: str, qtable_path: str, num_episodes: int = 10,
              output_csv: str = "evaluation_results.csv",
-             video: bool = False, video_dir: str = None) -> bool:
+             video: bool = False, video_dir: str = None,
+             trajectory_dir: str = None) -> bool:
     """Run play.py to evaluate a trained Q-table. Returns True on success."""
     cmd = [
         sys.executable, PLAY_SCRIPT,
@@ -84,6 +86,9 @@ def evaluate(algorithm: str, qtable_path: str, num_episodes: int = 10,
         cmd.extend(["--video", "--video_dir", video_dir])
     else:
         cmd.append("--headless")
+
+    if trajectory_dir:
+        cmd.extend(["--trajectory_dir", trajectory_dir])
 
     print(f"\n{'='*60}")
     print(f"  EVALUATE: {algorithm} ({os.path.basename(qtable_path)})")
@@ -286,7 +291,7 @@ def main():
             print(f"  Copied baseline -> {dest}")
 
     state_weight_configs = [
-        {"weights": [1, 2, 1, 2], "label": "low_1_2_1_2"},
+        {"weights": [1, 4, 1, 4], "label": "low_1_4_1_4"},
         {"weights": [2, 16, 2, 16], "label": "high_2_16_2_16"},
     ]
 
@@ -320,6 +325,7 @@ def main():
     suite4_dir = os.path.join(ROOT, "experiments", "suite_4_deployment")
     suite4_fig = os.path.join(ROOT, "figures", "suite_4_deployment")
     suite4_video_dir = os.path.join(suite4_dir, "videos")
+    suite4_traj_dir = os.path.join(suite4_dir, "trajectories")
     os.makedirs(suite4_dir, exist_ok=True)
     eval_csv = os.path.join(suite4_dir, "evaluation_results.csv")
 
@@ -334,7 +340,8 @@ def main():
             continue
         algo_video_dir = os.path.join(suite4_video_dir, algo)
         evaluate(algo, qtable_path, num_episodes=10, output_csv=eval_csv,
-                 video=True, video_dir=algo_video_dir)
+                 video=True, video_dir=algo_video_dir,
+                 trajectory_dir=suite4_traj_dir)
 
     # Generate deployment bar charts
     if os.path.isfile(eval_csv):
@@ -343,6 +350,15 @@ def main():
         plot_cmd = [sys.executable, PLOT_DEPLOYMENT,
                     "--csv", eval_csv, "--output", suite4_fig]
         print(f"  PLOT DEPLOYMENT -> {suite4_fig}/")
+        subprocess.run(plot_cmd, cwd=ROOT)
+
+    # Generate deployment trajectory analysis (phase portraits, stability, etc.)
+    traj_files = glob.glob(os.path.join(suite4_traj_dir, "*_trajectory.csv"))
+    if traj_files:
+        os.makedirs(suite4_fig, exist_ok=True)
+        plot_cmd = [sys.executable, PLOT_ANALYSIS,
+                    "--trajectories"] + sorted(traj_files) + ["--output", suite4_fig]
+        print(f"  PLOT ANALYSIS -> {suite4_fig}/")
         subprocess.run(plot_cmd, cwd=ROOT)
 
     # ── Summary ──────────────────────────────────────────────────────────

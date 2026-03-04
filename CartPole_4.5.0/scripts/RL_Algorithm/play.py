@@ -14,7 +14,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Evaluate a trained RL agent.")
 parser.add_argument("--video", action="store_true", default=False, help="Record videos during evaluation.")
-parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
+parser.add_argument("--video_length", type=int, default=1000, help="Length of the recorded video (in steps).")
 parser.add_argument("--video_interval", type=int, default=2000, help="Interval between video recordings (in steps).")
 parser.add_argument("--video_dir", type=str, default="videos", help="Directory to save recorded videos.")
 parser.add_argument("--num_envs", type=int, default=1, help="Number of environments to simulate.")
@@ -30,6 +30,8 @@ parser.add_argument("--num_episodes", type=int, default=10,
                     help="Number of evaluation episodes.")
 parser.add_argument("--output_csv", type=str, default="evaluation_results.csv",
                     help="Path for evaluation results CSV (appended to).")
+parser.add_argument("--trajectory_dir", type=str, default=None,
+                    help="Directory to save per-step trajectory CSVs for analysis plots.")
 
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
@@ -161,6 +163,7 @@ def main():
     # Run evaluation episodes
     episode_rewards = []
     episode_lengths = []
+    trajectory_rows = []  # per-step data for analysis plots
 
     while simulation_app.is_running():
         with torch.inference_mode():
@@ -174,12 +177,30 @@ def main():
                     # agent stepping
                     action, action_idx = agent.get_action(obs)
 
+                    # record state before stepping
+                    state = obs["policy"].cpu().numpy().flatten()
+                    action_val = float(action.item())
+
                     # env stepping
                     next_obs, reward, terminated, truncated, _ = env.step(action)
 
                     done = bool(terminated.item()) or bool(truncated.item())
-                    ep_reward += float(reward.item())
+                    r = float(reward.item())
+                    ep_reward += r
                     ep_steps += 1
+
+                    trajectory_rows.append({
+                        "episode": ep,
+                        "step": ep_steps,
+                        "cart_pos": float(state[0]),
+                        "pole_angle": float(state[1]),
+                        "cart_vel": float(state[2]),
+                        "pole_vel": float(state[3]),
+                        "action_idx": action_idx,
+                        "action_val": action_val,
+                        "reward": r,
+                    })
+
                     obs = next_obs
 
                 episode_rewards.append(ep_reward)
@@ -188,6 +209,16 @@ def main():
                       f"reward={ep_reward:.2f}, length={ep_steps}")
 
         break  # Exit simulation_app.is_running() loop after evaluation
+
+    # Save trajectory CSV if directory specified
+    if args_cli.trajectory_dir and trajectory_rows:
+        os.makedirs(args_cli.trajectory_dir, exist_ok=True)
+        traj_path = os.path.join(args_cli.trajectory_dir, f"{Algorithm_name}_trajectory.csv")
+        with open(traj_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=trajectory_rows[0].keys())
+            writer.writeheader()
+            writer.writerows(trajectory_rows)
+        print(f"Trajectory saved to: {traj_path}")
 
     # ==================================================================== #
 

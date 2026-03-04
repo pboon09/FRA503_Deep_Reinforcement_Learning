@@ -756,15 +756,20 @@ def main():
         save_state_heatmap(algo_dir, label, df)
         save_policy_heatmap(algo_dir, label, df)
         save_state_trajectory(algo_dir, label, df)
+        save_phase_portrait(algo_dir, label, df)
 
     # ── Comparison / aggregate plots ─────────────────────────────────────
     print(f"\n[comparison] plots → {cmp_dir}/")
     save_reward_curve(cmp_dir, datasets, w)
+    save_episode_reward(cmp_dir, datasets, w)
     save_episode_length(cmp_dir, datasets, w)
     save_epsilon(cmp_dir, datasets)
     save_action_distribution(cmp_dir, datasets)
     save_max_q(cmp_dir, datasets, w)
+    save_q_spread(cmp_dir, datasets, w)
+    save_td_error(cmp_dir, datasets, w)
     save_pole_variance(cmp_dir, datasets, w)
+    save_action_entropy(cmp_dir, datasets)
     save_state_coverage(cmp_dir, datasets)
     save_origin_q_convergence(cmp_dir, datasets)
 

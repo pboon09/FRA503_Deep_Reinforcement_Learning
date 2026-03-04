@@ -11,9 +11,9 @@
             1,
             8
         ],
-        "n_episodes": 10000,
+        "n_episodes": 20000,
         "start_epsilon": 1.0,
-        "epsilon_decay": 0.999,
+        "epsilon_decay": 0.9995,
         "final_epsilon": 0.01,
         "discount": 0.99
     },
