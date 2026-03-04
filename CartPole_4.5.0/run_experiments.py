@@ -237,7 +237,7 @@ def main():
             print(f"  Copied baseline -> {dest}")
 
     # Train ALL algorithms for each action resolution
-    for n_act in [25, 50]:
+    for n_act in [3, 11, 21]:
         original = mutate_config({"num_of_action": n_act})
         try:
             for algo in ALL_ALGOS:

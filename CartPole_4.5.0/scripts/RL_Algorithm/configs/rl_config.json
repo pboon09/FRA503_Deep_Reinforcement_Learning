@@ -19,7 +19,7 @@
     },
     "algorithms": {
         "MC": {
-            "learning_rate": 0.05
+            "learning_rate": 0.1
         },
         "SARSA": {
             "learning_rate": 0.1

@@ -349,12 +349,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                                 # Compute discounted returns backwards and update Q-table
                                 G = 0.0
                                 for t in reversed(range(len(mc_reward_hist[i]))):
-                                    G = discount * G + mc_reward_hist[i][t]
+                                    G = agent.discount_factor * G + mc_reward_hist[i][t]
                                     s = mc_obs_hist[i][t]
                                     a = mc_action_hist[i][t]
                                     agent.n_values[s][a] += 1
                                     error = G - agent.q_values[s][a]
-                                    agent.q_values[s][a] += error / agent.n_values[s][a]
+                                    # Constant-alpha update for non-stationary policy improvement
+                                    agent.q_values[s][a] += agent.lr * error
                                     agent.training_error.append(abs(error))
 
                                 mc_obs_hist[i].clear()

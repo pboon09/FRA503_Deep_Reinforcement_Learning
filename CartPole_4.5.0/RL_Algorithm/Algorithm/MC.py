@@ -50,7 +50,7 @@ class MC(BaseAlgorithm):
         Update Q-values using Monte Carlo.
 
         Accumulates (obs_dis, action, reward) each step. When done=True, computes
-        discounted returns backwards and updates Q-values via incremental mean.
+        discounted returns backwards and updates Q-values via constant-alpha.
 
         Args:
             obs_dis (tuple): Discretized state at current step.
@@ -68,10 +68,9 @@ class MC(BaseAlgorithm):
                 G = self.discount_factor * G + self.reward_hist[t]
                 s = self.obs_hist[t]
                 a = self.action_hist[t]
-                self.n_values[s][a] += 1
                 error = G - self.q_values[s][a]
-                # Incremental mean update (equivalent to learning with 1/N step size)
-                self.q_values[s][a] += error / self.n_values[s][a]
+                # Constant-alpha update for non-stationary policy improvement
+                self.q_values[s][a] += self.lr * error
                 self.training_error.append(abs(error))
             self.obs_hist.clear()
             self.action_hist.clear()
