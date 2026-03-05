@@ -456,16 +456,16 @@ def save_pole_variance(out_dir: str, datasets, window: int):
     print(f"  Saved: {path}")
 
 
-def save_action_entropy(out_dir: str, datasets, num_envs: int = 256):
+def save_action_entropy(out_dir: str, datasets):
     """Shannon entropy of action distribution per episode block."""
     fig, ax = plt.subplots(figsize=(10, 5))
     for i, (label, df) in enumerate(datasets):
         ent = action_entropy_per_block(df)
         ep = episode_blocks(df)
-        ax.plot(ep["episode"] * num_envs, rolling_mean(ent, max(1, len(ent) // 100)),
+        ax.plot(ep["episode"], rolling_mean(ent, max(1, len(ent) // 100)),
                 label=label, linewidth=1.8, color=_color(i))
     ax.set_title("Action Entropy per Episode")
-    ax.set_xlabel("Global Episode")
+    ax.set_xlabel("Episode")
     ax.set_ylabel("Entropy (nats)")
     ax.legend()
     ax.grid(True, alpha=0.3)
