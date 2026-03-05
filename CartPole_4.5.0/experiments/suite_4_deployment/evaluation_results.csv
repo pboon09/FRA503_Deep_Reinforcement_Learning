@@ -1,0 +1,5 @@
+algorithm,qtable_path,num_episodes,mean_reward,mean_length
+MC,/home/drl-68/FRA503_Deep_Reinforcement_Learning/CartPole_4.5.0/experiments/suite_1_baseline/MC.json,10,305.91305339336395,321.2
+SARSA,/home/drl-68/FRA503_Deep_Reinforcement_Learning/CartPole_4.5.0/experiments/suite_1_baseline/SARSA.json,10,131.3101555943489,141.6
+Q_Learning,/home/drl-68/FRA503_Deep_Reinforcement_Learning/CartPole_4.5.0/experiments/suite_1_baseline/Q_Learning.json,10,216.17823996543885,224.2
+Double_Q_Learning,/home/drl-68/FRA503_Deep_Reinforcement_Learning/CartPole_4.5.0/experiments/suite_1_baseline/Double_Q_Learning.json,10,158.736800044775,164.5
