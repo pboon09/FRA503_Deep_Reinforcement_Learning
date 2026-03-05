@@ -198,7 +198,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     )
     q_col_names = [f"q_{i}" for i in range(num_of_action)]
     csv_fieldnames = [
-        "episode", "step",
+        "episode", "step", "ep_length",
         "cart_pos", "pole_angle", "cart_vel", "pole_vel",
         "cart_pos_dis", "pole_angle_dis", "cart_vel_dis", "pole_vel_dis",
         "action_idx", "action_val",
@@ -208,13 +208,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     csv_writer = csv.DictWriter(csv_file, fieldnames=csv_fieldnames)
     csv_writer.writeheader()
 
-    def log_step(episode, step, raw_obs, obs_dis, action_idx, action_val, reward):
-        """Write one row to the CSV log."""
+    def log_step(episode, step, ep_length, raw_obs, obs_dis, action_idx, action_val, reward):
+        """Write one row to the CSV log (one row per completed episode)."""
         state = raw_obs["policy"].cpu().numpy().flatten()
         q_vals = agent.q_values[obs_dis]
         row = {
             "episode":        episode,
             "step":           step,
+            "ep_length":      ep_length,
             "cart_pos":       float(state[0]),
             "pole_angle":     float(state[1]),
             "cart_vel":       float(state[2]),
@@ -254,12 +255,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     total_episodes   = 0                         # total completed episodes across all envs
     sum_reward       = 0.0                       # accumulates episode returns for periodic print
     sum_ep_length    = 0.0                       # accumulates episode lengths for periodic log
-    last_log_ep      = 0                         # last env_0_episodes when we printed/saved
-    last_log_ep_total = 0                        # last total_episodes when we printed/saved
+    last_log_ep      = 0                         # last episode count when we printed/saved
     global_step      = 0
     train_start_time = time.time()               # for FPS calculation
     recent_actions   = []                        # env-0 action_idx buffer for entropy estimate
-    env_0_episodes   = 0                         # local episode counter for env 0 only
 
     # MC: per-env episode histories (agent's single-list histories won't work for multi-env)
     if Algorithm_name == "MC":
@@ -288,7 +287,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
             pbar = tqdm(total=n_episodes, desc=f"[{Algorithm_name}] Episodes")
 
-            while env_0_episodes < n_episodes:
+            while total_episodes < n_episodes:
 
                 # ---- Select action for every env ----
                 action_indices = []
@@ -415,24 +414,27 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                         sum_ep_length += ep_steps_snapshot
                         episode_steps[i] = 0
 
-                    # Log only env 0 every step to keep CSV size manageable
+                    # Log completed episodes from ALL envs to CSV
+                    if done_i:
+                        log_step(total_episodes, global_step, ep_steps_snapshot,
+                                 obs_i, obs_dis_list[i], action_indices[i],
+                                 action_vals[i], ep_return_snapshot)
+                        agent.decay_epsilon()
+
+                    # Track env-0 for entropy calculation
                     if i == 0:
-                        if done_i:
-                            env_0_episodes += 1
-                        log_step(env_0_episodes, global_step, obs_i,
-                                 obs_dis_list[i], action_indices[i], action_vals[i], r_i)
                         recent_actions.append(action_indices[i])
 
-                # ---- Progress bar update (track env-0 episodes, outside per-env loop) ----
-                pbar.n = env_0_episodes
-                pbar.refresh()
+                # ---- Progress bar update ----
+                if ep_completed_this_step > 0:
+                    pbar.update(ep_completed_this_step)
 
-                # ---- Periodic print and Q-value save (every 100 env-0 episodes) ----
-                if env_0_episodes - last_log_ep >= 100 and env_0_episodes > 0:
-                    n_new    = total_episodes - last_log_ep_total
-                    avg      = sum_reward / max(1, n_new)
-                    avg_len  = sum_ep_length / max(1, n_new)
-                    print(f"\n[Env-0 Episode {env_0_episodes} | Total {total_episodes}] avg_score: {avg:.2f}  avg_len: {avg_len:.0f}  epsilon: {agent.epsilon:.4f}")
+                # ---- Periodic print and Q-value save (every 100 completed episodes) ----
+                if total_episodes - last_log_ep >= 100 and total_episodes > 0:
+                    n_new    = total_episodes - last_log_ep
+                    avg      = sum_reward / n_new
+                    avg_len  = sum_ep_length / n_new
+                    print(f"\n[Episode {total_episodes}] avg_score: {avg:.2f}  avg_len: {avg_len:.0f}  epsilon: {agent.epsilon:.4f}")
 
                     # TensorBoard: matches Isaac Lab default format
                     tb_writer.add_scalar("rollout/ep_rew_mean", avg,     global_step)
@@ -455,22 +457,18 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                         tb_writer.add_scalar("train/entropy_loss", entropy, global_step)
                         recent_actions.clear()
 
-                    sum_reward      = 0.0
-                    sum_ep_length   = 0.0
-                    last_log_ep       = env_0_episodes
-                    last_log_ep_total = total_episodes
+                    sum_reward  = 0.0
+                    sum_ep_length = 0.0
+                    last_log_ep = total_episodes
 
-                    # Save Q-table every 5000 env-0 episodes
-                    if env_0_episodes % 5000 == 0:
+                    # Save Q-table every 5000 episodes
+                    if total_episodes % 5000 == 0:
                         q_value_file = (
-                            f"{Algorithm_name}_{env_0_episodes}"
+                            f"{Algorithm_name}_{total_episodes}"
                             f"_{num_of_action}_{action_range[1]}"
                             f"_{discretize_state_weight[0]}_{discretize_state_weight[1]}.json"
                         )
                         agent.save_q_value(q_save_dir, q_value_file)
-
-                # ---- Epsilon decay: once per global step ----
-                agent.decay_epsilon()
 
                 obs = next_obs
                 global_step += 1

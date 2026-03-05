@@ -75,20 +75,32 @@ def progress_pct(df: pd.DataFrame) -> np.ndarray:
 
 
 def episode_blocks(df: pd.DataFrame) -> pd.DataFrame:
-    """Group consecutive rows that share the same episode value.
+    """Extract per-episode data.
 
     Returns DataFrame with columns: [episode, steps, sum_reward, var_pole_angle].
-    'steps' = global steps elapsed in that block (proxy for episode length of env-0).
+    Supports both formats:
+      - New: one row per episode with 'ep_length' and 'reward' = total episode reward
+      - Old: multiple rows per episode, grouped by episode number
     """
-    block_id = (df["episode"] != df["episode"].shift()).cumsum()
-    grp = df.groupby(block_id, sort=False)
-    result = grp.agg(
-        episode=("episode", "first"),
-        steps=("step", "count"),
-        sum_reward=("reward", "sum"),
-        var_pole_angle=("pole_angle", "var"),
-    ).reset_index(drop=True)
-    return result[result["steps"] > 0].reset_index(drop=True)
+    if "ep_length" in df.columns:
+        # New format: one row per completed episode
+        return pd.DataFrame({
+            "episode": df["episode"].values,
+            "steps": df["ep_length"].values,
+            "sum_reward": df["reward"].values,
+            "var_pole_angle": df["pole_angle"].values,
+        }).reset_index(drop=True)
+    else:
+        # Old format: multiple rows per episode block
+        block_id = (df["episode"] != df["episode"].shift()).cumsum()
+        grp = df.groupby(block_id, sort=False)
+        result = grp.agg(
+            episode=("episode", "first"),
+            steps=("step", "count"),
+            sum_reward=("reward", "sum"),
+            var_pole_angle=("pole_angle", "var"),
+        ).reset_index(drop=True)
+        return result[result["steps"] > 0].reset_index(drop=True)
 
 
 def compute_td_error(df: pd.DataFrame) -> pd.Series:
