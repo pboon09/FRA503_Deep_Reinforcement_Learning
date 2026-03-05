@@ -287,7 +287,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
             pbar = tqdm(total=n_episodes, desc=f"[{Algorithm_name}] Episodes")
 
-            while total_episodes < n_episodes:
+            while env_0_episodes < n_episodes:
 
                 # ---- Select action for every env ----
                 action_indices = []
@@ -422,9 +422,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                                  obs_dis_list[i], action_indices[i], action_vals[i], r_i)
                         recent_actions.append(action_indices[i])
 
-                # ---- Progress bar update ----
-                if ep_completed_this_step > 0:
-                    pbar.update(ep_completed_this_step)
+                # ---- Progress bar update (track env-0 episodes) ----
+                pbar.n = env_0_episodes
+                pbar.refresh()
 
                 # ---- Periodic print and Q-value save (every 100 completed episodes) ----
                 if total_episodes - last_log_ep >= 100 and total_episodes > 0:
@@ -458,12 +458,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                     sum_ep_length = 0.0
                     last_log_ep = total_episodes
 
-                    q_value_file = (
-                        f"{Algorithm_name}_{total_episodes}"
-                        f"_{num_of_action}_{action_range[1]}"
-                        f"_{discretize_state_weight[0]}_{discretize_state_weight[1]}.json"
-                    )
-                    agent.save_q_value(q_save_dir, q_value_file)
+                    # Save Q-table every 5000 episodes (not every 100)
+                    if total_episodes % 5000 == 0:
+                        q_value_file = (
+                            f"{Algorithm_name}_{total_episodes}"
+                            f"_{num_of_action}_{action_range[1]}"
+                            f"_{discretize_state_weight[0]}_{discretize_state_weight[1]}.json"
+                        )
+                        agent.save_q_value(q_save_dir, q_value_file)
 
                 # ---- Epsilon decay: once per global step ----
                 agent.decay_epsilon()
@@ -472,6 +474,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 global_step += 1
 
             pbar.close()
+
+            # Save final Q-table
+            q_value_file = (
+                f"{Algorithm_name}_{total_episodes}"
+                f"_{num_of_action}_{action_range[1]}"
+                f"_{discretize_state_weight[0]}_{discretize_state_weight[1]}.json"
+            )
+            agent.save_q_value(q_save_dir, q_value_file)
 
         csv_file.close()
         tb_writer.close()

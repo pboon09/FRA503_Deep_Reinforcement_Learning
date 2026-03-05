@@ -2,3 +2,10 @@
 /__pycache__
 /.vscode
 *.tex
+
+# ── Training artifacts (generated on training machine, not needed in git) ──
+CartPole_4.5.0/q_value/
+CartPole_4.5.0/logs/
+
+# ── Videos (too large for regular git, use LFS later) ──
+CartPole_4.5.0/experiments/suite_4_deployment/videos/
