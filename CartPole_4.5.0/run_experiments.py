@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Automated HW2 experiment runner.
 
-Executes 4 experimental suites, collects logs + Q-tables, and generates plots:
+Executes 8 experimental suites, collects logs + Q-tables, and generates plots:
 
   Suite 1: Baseline       - all 4 algorithms with default config
   Suite 2: Action Resol.  - all 4 algorithms with num_of_action = 3, 5, 11, 21
   Suite 3: State Resol.   - all 4 algorithms with weights [1,4,1,4], [1,8,1,8], [2,16,2,16]
-  Suite 4: Deployment     - play.py evaluation with epsilon=0, video recording, bar charts
+  Suite 4: Deployment     - play.py evaluation with epsilon=0, video recording
+  Suite 5: LR Sweep       - all 4 algorithms with alpha = 0.01, 0.05, 0.1, 0.3, 0.5, 0.9
+  Suite 6: Epsilon Sched  - per_step, per_episode, fixed epsilon decay modes
+  Suite 7: Gamma Sweep    - all 4 algorithms with gamma = 0.9, 0.95, 0.99, 0.999, 1.0
+  Suite 8: Q0 Init Sweep  - all 4 algorithms with Q0 = 0, 10, 50, 100
 
     python run_experiments.py
 """
@@ -117,6 +121,34 @@ def mutate_config(updates: dict) -> dict:
         json.dump(modified, f, indent=4)
 
     print(f"  CONFIG MUTATED: {updates}")
+    return original
+
+
+def mutate_config_full(shared_updates: dict = None, algo_lr: float = None) -> dict:
+    """Read rl_config.json, apply shared updates and/or set all algorithm LRs.
+
+    Returns the original config dict (pass to restore_config to revert).
+    """
+    with open(CONFIG_PATH, "r") as f:
+        original = json.load(f)
+
+    modified = json.loads(json.dumps(original))  # deep copy
+    if shared_updates:
+        for key, value in shared_updates.items():
+            modified["shared"][key] = value
+    if algo_lr is not None:
+        for algo_name in modified["algorithms"]:
+            modified["algorithms"][algo_name]["learning_rate"] = algo_lr
+
+    with open(CONFIG_PATH, "w") as f:
+        json.dump(modified, f, indent=4)
+
+    msg_parts = []
+    if shared_updates:
+        msg_parts.append(f"shared={shared_updates}")
+    if algo_lr is not None:
+        msg_parts.append(f"all_algo_lr={algo_lr}")
+    print(f"  CONFIG MUTATED: {', '.join(msg_parts)}")
     return original
 
 
@@ -314,9 +346,168 @@ def main():
                  video=True, video_dir=algo_video_dir,
                  trajectory_dir=suite4_traj_dir)
 
-    # ── Report Figures (6 composite figures) ─────────────────────────────
+    # ── Suite 5: Learning Rate Sweep ─────────────────────────────────────
     print(f"\n{'#'*60}")
-    print("  REPORT FIGURES (6 composite figures)")
+    print("  SUITE 5: Learning Rate Sweep")
+    print(f"{'#'*60}")
+
+    suite5_dir = os.path.join(ROOT, "experiments", "suite_5_lr")
+
+    # Copy baseline as lr_0.1 reference
+    for algo in ALL_ALGOS:
+        baseline_csv = os.path.join(suite1_dir, f"{algo}.csv")
+        baseline_qt = os.path.join(suite1_dir, f"{algo}.json")
+        if os.path.isfile(baseline_csv):
+            os.makedirs(suite5_dir, exist_ok=True)
+            dest = os.path.join(suite5_dir, f"{algo}_lr_0.1.csv")
+            shutil.copy2(baseline_csv, dest)
+            print(f"  Copied baseline -> {dest}")
+        if os.path.isfile(baseline_qt):
+            os.makedirs(suite5_dir, exist_ok=True)
+            dest = os.path.join(suite5_dir, f"{algo}_lr_0.1.json")
+            shutil.copy2(baseline_qt, dest)
+            print(f"  Copied baseline -> {dest}")
+
+    for lr_val in [0.01, 0.05, 0.3, 0.5, 0.9]:
+        original = mutate_config_full(algo_lr=lr_val)
+        try:
+            for algo in ALL_ALGOS:
+                ok = train(algo)
+                if not ok:
+                    print(f"  ERROR: {algo} (lr={lr_val}) training failed.")
+                    continue
+                collect_csv_named(algo, suite5_dir, f"{algo}_lr_{lr_val}.csv")
+                collect_qtable_named(algo, suite5_dir, f"{algo}_lr_{lr_val}.json")
+        finally:
+            restore_config(original)
+
+    # ── Suite 6: Epsilon Schedule Sweep ───────────────────────────────────
+    print(f"\n{'#'*60}")
+    print("  SUITE 6: Epsilon Schedule Sweep")
+    print(f"{'#'*60}")
+
+    suite6_dir = os.path.join(ROOT, "experiments", "suite_6_epsilon")
+
+    # Copy baseline as eps_per_episode_0.9995 reference
+    for algo in ALL_ALGOS:
+        baseline_csv = os.path.join(suite1_dir, f"{algo}.csv")
+        baseline_qt = os.path.join(suite1_dir, f"{algo}.json")
+        if os.path.isfile(baseline_csv):
+            os.makedirs(suite6_dir, exist_ok=True)
+            dest = os.path.join(suite6_dir, f"{algo}_per_episode_0.9995.csv")
+            shutil.copy2(baseline_csv, dest)
+            print(f"  Copied baseline -> {dest}")
+        if os.path.isfile(baseline_qt):
+            os.makedirs(suite6_dir, exist_ok=True)
+            dest = os.path.join(suite6_dir, f"{algo}_per_episode_0.9995.json")
+            shutil.copy2(baseline_qt, dest)
+            print(f"  Copied baseline -> {dest}")
+
+    eps_configs = [
+        {"mode": "per_step",    "decay": 0.9995, "start": 1.0, "label": "per_step_0.9995"},
+        {"mode": "per_step",    "decay": 0.999,  "start": 1.0, "label": "per_step_0.999"},
+        {"mode": "per_step",    "decay": 0.9999, "start": 1.0, "label": "per_step_0.9999"},
+        {"mode": "per_episode", "decay": 0.995,  "start": 1.0, "label": "per_episode_0.995"},
+        {"mode": "per_episode", "decay": 0.99,   "start": 1.0, "label": "per_episode_0.99"},
+        {"mode": "fixed",       "decay": 1.0,    "start": 0.1, "label": "fixed_0.1"},
+    ]
+
+    for ecfg in eps_configs:
+        original = mutate_config_full(shared_updates={
+            "epsilon_decay_mode": ecfg["mode"],
+            "epsilon_decay": ecfg["decay"],
+            "start_epsilon": ecfg["start"],
+        })
+        try:
+            for algo in ALL_ALGOS:
+                ok = train(algo)
+                if not ok:
+                    print(f"  ERROR: {algo} (eps={ecfg['label']}) training failed.")
+                    continue
+                collect_csv_named(algo, suite6_dir,
+                                  f"{algo}_{ecfg['label']}.csv")
+                collect_qtable_named(algo, suite6_dir,
+                                     f"{algo}_{ecfg['label']}.json")
+        finally:
+            restore_config(original)
+
+    # ── Suite 7: Discount Factor Sweep ────────────────────────────────────
+    print(f"\n{'#'*60}")
+    print("  SUITE 7: Discount Factor Sweep")
+    print(f"{'#'*60}")
+
+    suite7_dir = os.path.join(ROOT, "experiments", "suite_7_gamma")
+
+    # Copy baseline as gamma_0.99 reference
+    for algo in ALL_ALGOS:
+        baseline_csv = os.path.join(suite1_dir, f"{algo}.csv")
+        baseline_qt = os.path.join(suite1_dir, f"{algo}.json")
+        if os.path.isfile(baseline_csv):
+            os.makedirs(suite7_dir, exist_ok=True)
+            dest = os.path.join(suite7_dir, f"{algo}_gamma_0.99.csv")
+            shutil.copy2(baseline_csv, dest)
+            print(f"  Copied baseline -> {dest}")
+        if os.path.isfile(baseline_qt):
+            os.makedirs(suite7_dir, exist_ok=True)
+            dest = os.path.join(suite7_dir, f"{algo}_gamma_0.99.json")
+            shutil.copy2(baseline_qt, dest)
+            print(f"  Copied baseline -> {dest}")
+
+    for gamma_val in [0.9, 0.95, 0.999, 1.0]:
+        original = mutate_config_full(shared_updates={"discount": gamma_val})
+        try:
+            for algo in ALL_ALGOS:
+                ok = train(algo)
+                if not ok:
+                    print(f"  ERROR: {algo} (gamma={gamma_val}) training failed.")
+                    continue
+                collect_csv_named(algo, suite7_dir,
+                                  f"{algo}_gamma_{gamma_val}.csv")
+                collect_qtable_named(algo, suite7_dir,
+                                     f"{algo}_gamma_{gamma_val}.json")
+        finally:
+            restore_config(original)
+
+    # ── Suite 8: Q₀ Initialization Sweep ──────────────────────────────────
+    print(f"\n{'#'*60}")
+    print("  SUITE 8: Q0 Initialization Sweep")
+    print(f"{'#'*60}")
+
+    suite8_dir = os.path.join(ROOT, "experiments", "suite_8_q_init")
+
+    # Copy baseline as q_init_0.0 reference
+    for algo in ALL_ALGOS:
+        baseline_csv = os.path.join(suite1_dir, f"{algo}.csv")
+        baseline_qt = os.path.join(suite1_dir, f"{algo}.json")
+        if os.path.isfile(baseline_csv):
+            os.makedirs(suite8_dir, exist_ok=True)
+            dest = os.path.join(suite8_dir, f"{algo}_q_init_0.0.csv")
+            shutil.copy2(baseline_csv, dest)
+            print(f"  Copied baseline -> {dest}")
+        if os.path.isfile(baseline_qt):
+            os.makedirs(suite8_dir, exist_ok=True)
+            dest = os.path.join(suite8_dir, f"{algo}_q_init_0.0.json")
+            shutil.copy2(baseline_qt, dest)
+            print(f"  Copied baseline -> {dest}")
+
+    for q0_val in [10.0, 50.0, 100.0]:
+        original = mutate_config_full(shared_updates={"q_init": q0_val})
+        try:
+            for algo in ALL_ALGOS:
+                ok = train(algo)
+                if not ok:
+                    print(f"  ERROR: {algo} (q_init={q0_val}) training failed.")
+                    continue
+                collect_csv_named(algo, suite8_dir,
+                                  f"{algo}_q_init_{q0_val}.csv")
+                collect_qtable_named(algo, suite8_dir,
+                                     f"{algo}_q_init_{q0_val}.json")
+        finally:
+            restore_config(original)
+
+    # ── Report Figures ────────────────────────────────────────────────────
+    print(f"\n{'#'*60}")
+    print("  REPORT FIGURES")
     print(f"{'#'*60}")
 
     figures_dir = os.path.join(ROOT, "figures")
@@ -332,6 +523,10 @@ def main():
     print(f"  Suite 2 (Action Res):  {suite2_dir}/")
     print(f"  Suite 3 (State Res):   {suite3_dir}/")
     print(f"  Suite 4 (Deployment):  {suite4_dir}/")
+    print(f"  Suite 5 (LR Sweep):    {suite5_dir}/")
+    print(f"  Suite 6 (Epsilon Sch): {suite6_dir}/")
+    print(f"  Suite 7 (Gamma):       {suite7_dir}/")
+    print(f"  Suite 8 (Q0 Init):     {suite8_dir}/")
     print(f"  Figures:               {figures_dir}/")
     print("=" * 60)
 

@@ -46,6 +46,7 @@ class BaseAlgorithm():
         epsilon_decay: float,
         final_epsilon: float,
         discount_factor: float,
+        q_init: float = 0.0,
     ):
         self.control_type = control_type
         self.lr = learning_rate
@@ -53,12 +54,13 @@ class BaseAlgorithm():
         self.epsilon = initial_epsilon
         self.epsilon_decay = epsilon_decay
         self.final_epsilon = final_epsilon
+        self.q_init = q_init
 
         self.num_of_action = num_of_action
         self.action_range = action_range
         self.discretize_state_weight = discretize_state_weight
 
-        self.q_values = defaultdict(lambda: np.zeros(self.num_of_action))
+        self.q_values = defaultdict(lambda: np.full(self.num_of_action, self.q_init))
         self.n_values = defaultdict(lambda: np.zeros(self.num_of_action))
         self.training_error = []
 
@@ -67,8 +69,8 @@ class BaseAlgorithm():
             self.action_hist = []
             self.reward_hist = []
         elif self.control_type == ControlType.DOUBLE_Q_LEARNING:
-            self.qa_values = defaultdict(lambda: np.zeros(self.num_of_action))
-            self.qb_values = defaultdict(lambda: np.zeros(self.num_of_action))
+            self.qa_values = defaultdict(lambda: np.full(self.num_of_action, self.q_init))
+            self.qb_values = defaultdict(lambda: np.full(self.num_of_action, self.q_init))
 
     def discretize_state(self, obs: dict):
         """

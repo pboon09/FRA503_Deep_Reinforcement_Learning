@@ -80,21 +80,25 @@ python scripts/RL_Algorithm/play.py \
 python run_experiments.py
 ```
 
-This runs all 4 suites automatically:
+This runs all 8 suites automatically:
 
-| Suite                 | What It Does                                        | Output                            |
-| --------------------- | --------------------------------------------------- | --------------------------------- |
-| 1 - Baseline          | Train 4 algorithms with default config              | `experiments/suite_1_baseline/`   |
-| 2 - Action Resolution | Train 4 algos x {3, 5, 11, 21} actions              | `experiments/suite_2_action/`     |
-| 3 - State Resolution  | Train 4 algos x {[1,4,1,4], [1,8,1,8], [2,16,2,16]} | `experiments/suite_3_state/`      |
-| 4 - Deployment        | Evaluate each baseline Q-table (epsilon=0) + video  | `experiments/suite_4_deployment/` |
+| Suite                  | What It Does                                         | Output                            |
+| ---------------------- | ---------------------------------------------------- | --------------------------------- |
+| 1 - Baseline           | Train 4 algorithms with default config               | `experiments/suite_1_baseline/`   |
+| 2 - Action Resolution  | Train 4 algos x {3, 5, 11, 21} actions               | `experiments/suite_2_action/`     |
+| 3 - State Resolution   | Train 4 algos x {[1,4,1,4], [1,8,1,8], [2,16,2,16]} | `experiments/suite_3_state/`      |
+| 4 - Deployment         | Evaluate each baseline Q-table (epsilon=0) + video   | `experiments/suite_4_deployment/` |
+| 5 - Learning Rate      | Train 4 algos x {0.01, 0.05, 0.1, 0.3, 0.5, 0.9}   | `experiments/suite_5_lr/`         |
+| 6 - Epsilon Schedule   | Per-step / per-episode / fixed decay modes            | `experiments/suite_6_epsilon/`    |
+| 7 - Discount Factor    | Train 4 algos x {0.9, 0.95, 0.99, 0.999, 1.0}       | `experiments/suite_7_gamma/`      |
+| 8 - Q₀ Initialization  | Train 4 algos x {0, 10, 50, 100}                     | `experiments/suite_8_q_init/`     |
 
 After all suites complete, report figures are generated automatically via `plot_report_figures.py`.
 
 ## Visualize
 
 ```bash
-# Generate all 8 report figures at once
+# Generate all 12 report figures at once
 python scripts/RL_Algorithm/visualize/plot_report_figures.py --output figures/
 ```
 
@@ -110,6 +114,10 @@ This generates:
 | `fig6_deployment.png`        | 2x2: Phase portraits (deployment, best episode)  |
 | `fig7_q_surface.png`         | 3D Q-value surfaces per algorithm                 |
 | `fig8_policy_surface.png`    | 3D Policy surfaces per algorithm                  |
+| `fig9_lr_sweep.png`          | 2x2: Learning rate sensitivity per algorithm      |
+| `fig10_epsilon_sweep.png`    | 2x2: Epsilon schedule sensitivity per algorithm   |
+| `fig11_gamma_sweep.png`      | 2x2: Discount factor sensitivity per algorithm    |
+| `fig12_q_init_sweep.png`     | 2x2: Q₀ initialization sensitivity per algorithm  |
 
 ## Results
 
@@ -118,10 +126,14 @@ experiments/
 ├── suite_1_baseline/          # 4 CSVs + 4 Q-table JSONs
 ├── suite_2_action/            # 16 CSVs + 16 JSONs (4 algos x 4 action configs)
 ├── suite_3_state/             # 12 CSVs + 12 JSONs (4 algos x 3 weight configs)
-└── suite_4_deployment/
-    ├── evaluation_results.csv # Mean reward & length per algorithm
-    ├── videos/<algorithm>/    # Recorded evaluation videos
-    └── trajectories/          # Per-step trajectory CSVs
+├── suite_4_deployment/
+│   ├── evaluation_results.csv # Mean reward & length per algorithm
+│   ├── videos/<algorithm>/    # Recorded evaluation videos
+│   └── trajectories/          # Per-step trajectory CSVs
+├── suite_5_lr/                # 24 CSVs + 24 JSONs (4 algos x 6 LR values)
+├── suite_6_epsilon/           # 28 CSVs + 28 JSONs (4 algos x 7 epsilon configs)
+├── suite_7_gamma/             # 20 CSVs + 20 JSONs (4 algos x 5 gamma values)
+└── suite_8_q_init/            # 16 CSVs + 16 JSONs (4 algos x 4 Q₀ values)
 
 figures/
 ├── fig1_feedback_loop.png
@@ -131,7 +143,11 @@ figures/
 ├── fig5_state_sweep.png
 ├── fig6_deployment.png
 ├── fig7_q_surface.png
-└── fig8_policy_surface.png
+├── fig8_policy_surface.png
+├── fig9_lr_sweep.png
+├── fig10_epsilon_sweep.png
+├── fig11_gamma_sweep.png
+└── fig12_q_init_sweep.png
 ```
 
 ## Project Structure

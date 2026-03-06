@@ -14,8 +14,10 @@
         "n_episodes": 20000,
         "start_epsilon": 1.0,
         "epsilon_decay": 0.9995,
+        "epsilon_decay_mode": "per_episode",
         "final_epsilon": 0.01,
-        "discount": 0.99
+        "discount": 0.99,
+        "q_init": 0.0
     },
     "algorithms": {
         "MC": {

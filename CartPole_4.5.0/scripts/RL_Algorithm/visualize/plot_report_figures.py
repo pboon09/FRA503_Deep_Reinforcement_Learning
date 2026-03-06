@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
-"""Generate exactly 6 report figures for hw2.tex (Gemini's architecture).
+"""Generate report figures for hw2.tex.
 
-Figures:
-  1. fig1_feedback_loop.png    — 1×2: Total Reward + State Coverage
-  2. fig2_credit_assignment.png — 1×2: Max Q-value + TD Error
-  3. fig3_representation.png   — 2×2: Value heatmaps (top) + Policy heatmaps (bottom)
-  4. fig4_action_sweep.png     — 2×2: Action resolution per algorithm
-  5. fig5_state_sweep.png      — 2×2: State resolution per algorithm
-  6. fig6_deployment.png       — 2×2: Phase portraits (deployment, best episode)
+Figures 1-8: Original suites (baseline, credit assignment, representation,
+             action sweep, state sweep, deployment, Q-surface, policy surface)
+Figures 9-12: Additional hyperparameter sweeps
+  9.  fig9_lr_sweep.png       — 2×2: Learning rate sensitivity per algorithm
+  10. fig10_epsilon_sweep.png  — 2×2: Epsilon schedule sensitivity per algorithm
+  11. fig11_gamma_sweep.png    — 2×2: Discount factor sensitivity per algorithm
+  12. fig12_q_init_sweep.png   — 2×2: Q₀ initialization sensitivity per algorithm
 
 Data sources:
   - Suite 1: experiments/suite_1_baseline/{algo}.csv + {algo}.json
   - Suite 2: experiments/suite_2_action/{algo}_act_{n}.csv
   - Suite 3: experiments/suite_3_state/{algo}_{label}.csv
   - Suite 4: experiments/suite_4_deployment/trajectories/{algo}_trajectory.csv
+  - Suite 5: experiments/suite_5_lr/{algo}_lr_{val}.csv
+  - Suite 6: experiments/suite_6_epsilon/{algo}_{label}.csv
+  - Suite 7: experiments/suite_7_gamma/{algo}_gamma_{val}.csv
+  - Suite 8: experiments/suite_8_q_init/{algo}_q_init_{val}.csv
 
 Usage:
     python scripts/RL_Algorithm/visualize/plot_report_figures.py
@@ -578,12 +582,199 @@ def make_fig8(output_dir: str):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Figure 9: Learning Rate Sweep (2×2)
+#   Each panel = one algorithm, lines = different α values
+# ─────────────────────────────────────────────────────────────────────────────
+
+def make_fig9(output_dir: str):
+    suite5_dir = os.path.join(ROOT, "experiments", "suite_5_lr")
+    lr_values = [0.01, 0.05, 0.1, 0.3, 0.5, 0.9]
+    lr_colors = {0.01: "#1f77b4", 0.05: "#ff7f0e", 0.1: "#2ca02c",
+                 0.3: "#d62728", 0.5: "#9467bd", 0.9: "#8c564b"}
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle("Learning Rate Sensitivity (Episode Total Reward)",
+                 fontsize=14, fontweight="bold")
+
+    for idx, algo in enumerate(ALGOS):
+        r, c = divmod(idx, 2)
+        ax = axes[r, c]
+        for lr_val in lr_values:
+            csv_path = os.path.join(suite5_dir, f"{algo}_lr_{lr_val}.csv")
+            if not os.path.isfile(csv_path):
+                continue
+            df = pd.read_csv(csv_path)
+            ep = episode_blocks(df)
+            w = max(1, len(ep) // 15)
+            smooth = rolling_mean(ep["sum_reward"], w)
+            std = ep["sum_reward"].rolling(w, min_periods=1).std().fillna(0)
+            ax.plot(ep["episode"], smooth, label=f"α={lr_val}",
+                    linewidth=1.8, color=lr_colors[lr_val])
+            ax.fill_between(ep["episode"], smooth - std, smooth + std,
+                            alpha=0.12, color=lr_colors[lr_val])
+        ax.set_title(ALGO_DISPLAY[algo], fontsize=12, fontweight="bold")
+        ax.set_xlabel("Episode")
+        ax.set_ylabel("Total Reward")
+        ax.legend(fontsize=8, loc="upper left")
+        ax.grid(True, alpha=0.3)
+        ax.set_ylim(bottom=0)
+
+    fig.tight_layout()
+    path = os.path.join(output_dir, "fig9_lr_sweep.png")
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: {path}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Figure 10: Epsilon Schedule Sweep (2×2)
+#   Each panel = one algorithm, lines = different epsilon schedules
+# ─────────────────────────────────────────────────────────────────────────────
+
+def make_fig10(output_dir: str):
+    suite6_dir = os.path.join(ROOT, "experiments", "suite_6_epsilon")
+    eps_configs = [
+        ("per_episode_0.9995", "Per-ep d=0.9995 (baseline)", "#2ca02c"),
+        ("per_step_0.9995",    "Per-step d=0.9995",          "#1f77b4"),
+        ("per_step_0.999",     "Per-step d=0.999",           "#ff7f0e"),
+        ("per_step_0.9999",    "Per-step d=0.9999",          "#9467bd"),
+        ("per_episode_0.995",  "Per-ep d=0.995",             "#d62728"),
+        ("per_episode_0.99",   "Per-ep d=0.99",              "#8c564b"),
+        ("fixed_0.1",          "Fixed ε=0.1",                "#e377c2"),
+    ]
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle("Epsilon Schedule Sensitivity (Episode Total Reward)",
+                 fontsize=14, fontweight="bold")
+
+    for idx, algo in enumerate(ALGOS):
+        r, c = divmod(idx, 2)
+        ax = axes[r, c]
+        for label_key, display, color in eps_configs:
+            csv_path = os.path.join(suite6_dir, f"{algo}_{label_key}.csv")
+            if not os.path.isfile(csv_path):
+                continue
+            df = pd.read_csv(csv_path)
+            ep = episode_blocks(df)
+            w = max(1, len(ep) // 15)
+            smooth = rolling_mean(ep["sum_reward"], w)
+            std = ep["sum_reward"].rolling(w, min_periods=1).std().fillna(0)
+            ax.plot(ep["episode"], smooth, label=display,
+                    linewidth=1.8, color=color)
+            ax.fill_between(ep["episode"], smooth - std, smooth + std,
+                            alpha=0.12, color=color)
+        ax.set_title(ALGO_DISPLAY[algo], fontsize=12, fontweight="bold")
+        ax.set_xlabel("Episode")
+        ax.set_ylabel("Total Reward")
+        ax.legend(fontsize=7, loc="upper left")
+        ax.grid(True, alpha=0.3)
+        ax.set_ylim(bottom=0)
+
+    fig.tight_layout()
+    path = os.path.join(output_dir, "fig10_epsilon_sweep.png")
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: {path}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Figure 11: Discount Factor Sweep (2×2)
+#   Each panel = one algorithm, lines = different γ values
+# ─────────────────────────────────────────────────────────────────────────────
+
+def make_fig11(output_dir: str):
+    suite7_dir = os.path.join(ROOT, "experiments", "suite_7_gamma")
+    gamma_values = [0.9, 0.95, 0.99, 0.999, 1.0]
+    gamma_colors = {0.9: "#1f77b4", 0.95: "#ff7f0e", 0.99: "#2ca02c",
+                    0.999: "#d62728", 1.0: "#9467bd"}
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle("Discount Factor Sensitivity (Episode Total Reward)",
+                 fontsize=14, fontweight="bold")
+
+    for idx, algo in enumerate(ALGOS):
+        r, c = divmod(idx, 2)
+        ax = axes[r, c]
+        for gamma_val in gamma_values:
+            csv_path = os.path.join(suite7_dir, f"{algo}_gamma_{gamma_val}.csv")
+            if not os.path.isfile(csv_path):
+                continue
+            df = pd.read_csv(csv_path)
+            ep = episode_blocks(df)
+            w = max(1, len(ep) // 15)
+            smooth = rolling_mean(ep["sum_reward"], w)
+            std = ep["sum_reward"].rolling(w, min_periods=1).std().fillna(0)
+            ax.plot(ep["episode"], smooth, label=f"γ={gamma_val}",
+                    linewidth=1.8, color=gamma_colors[gamma_val])
+            ax.fill_between(ep["episode"], smooth - std, smooth + std,
+                            alpha=0.12, color=gamma_colors[gamma_val])
+        ax.set_title(ALGO_DISPLAY[algo], fontsize=12, fontweight="bold")
+        ax.set_xlabel("Episode")
+        ax.set_ylabel("Total Reward")
+        ax.legend(fontsize=9, loc="upper left")
+        ax.grid(True, alpha=0.3)
+        ax.set_ylim(bottom=0)
+
+    fig.tight_layout()
+    path = os.path.join(output_dir, "fig11_gamma_sweep.png")
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: {path}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Figure 12: Q₀ Initialization Sweep (2×2)
+#   Each panel = one algorithm, lines = different Q₀ values
+# ─────────────────────────────────────────────────────────────────────────────
+
+def make_fig12(output_dir: str):
+    suite8_dir = os.path.join(ROOT, "experiments", "suite_8_q_init")
+    q_init_values = [0.0, 10.0, 50.0, 100.0]
+    q_init_colors = {0.0: "#1f77b4", 10.0: "#ff7f0e",
+                     50.0: "#2ca02c", 100.0: "#d62728"}
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle("Q₀ Initialization Sensitivity (Episode Total Reward)",
+                 fontsize=14, fontweight="bold")
+
+    for idx, algo in enumerate(ALGOS):
+        r, c = divmod(idx, 2)
+        ax = axes[r, c]
+        for q0_val in q_init_values:
+            csv_path = os.path.join(suite8_dir,
+                                    f"{algo}_q_init_{q0_val}.csv")
+            if not os.path.isfile(csv_path):
+                continue
+            df = pd.read_csv(csv_path)
+            ep = episode_blocks(df)
+            w = max(1, len(ep) // 15)
+            smooth = rolling_mean(ep["sum_reward"], w)
+            std = ep["sum_reward"].rolling(w, min_periods=1).std().fillna(0)
+            ax.plot(ep["episode"], smooth, label=f"Q₀={q0_val:.0f}",
+                    linewidth=1.8, color=q_init_colors[q0_val])
+            ax.fill_between(ep["episode"], smooth - std, smooth + std,
+                            alpha=0.12, color=q_init_colors[q0_val])
+        ax.set_title(ALGO_DISPLAY[algo], fontsize=12, fontweight="bold")
+        ax.set_xlabel("Episode")
+        ax.set_ylabel("Total Reward")
+        ax.legend(fontsize=9, loc="upper left")
+        ax.grid(True, alpha=0.3)
+        ax.set_ylim(bottom=0)
+
+    fig.tight_layout()
+    path = os.path.join(output_dir, "fig12_q_init_sweep.png")
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: {path}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="Generate exactly 6 report figures for hw2.tex.")
+        description="Generate report figures for hw2.tex.")
     p.add_argument(
         "--output", default=os.path.join(ROOT, "figures"),
         help="Output directory (default: figures/).")
@@ -594,33 +785,45 @@ def main():
     args = parse_args()
     os.makedirs(args.output, exist_ok=True)
 
-    print(f"Generating 8 report figures → {args.output}/\n")
+    print(f"Generating 12 report figures → {args.output}/\n")
 
-    print("[1/8] Figure 1: Exploration Feedback Loop")
+    print("[1/12] Figure 1: Exploration Feedback Loop")
     make_fig1(args.output)
 
-    print("[2/8] Figure 2: Credit Assignment Bottleneck")
+    print("[2/12] Figure 2: Credit Assignment Bottleneck")
     make_fig2(args.output)
 
-    print("[3/8] Figure 3: Representation Structure")
+    print("[3/12] Figure 3: Representation Structure")
     make_fig3(args.output)
 
-    print("[4/8] Figure 4: Action Resolution Sweep")
+    print("[4/12] Figure 4: Action Resolution Sweep")
     make_fig4(args.output)
 
-    print("[5/8] Figure 5: State Resolution Sweep")
+    print("[5/12] Figure 5: State Resolution Sweep")
     make_fig5(args.output)
 
-    print("[6/8] Figure 6: Deployment Phase Portraits")
+    print("[6/12] Figure 6: Deployment Phase Portraits")
     make_fig6(args.output)
 
-    print("[7/8] Figure 7: 3D Q-Value Surface")
+    print("[7/12] Figure 7: 3D Q-Value Surface")
     make_fig7(args.output)
 
-    print("[8/8] Figure 8: 3D Policy Surface")
+    print("[8/12] Figure 8: 3D Policy Surface")
     make_fig8(args.output)
 
-    print(f"\nDone. 8 figures saved to: {args.output}/")
+    print("[9/12] Figure 9: Learning Rate Sweep")
+    make_fig9(args.output)
+
+    print("[10/12] Figure 10: Epsilon Schedule Sweep")
+    make_fig10(args.output)
+
+    print("[11/12] Figure 11: Discount Factor Sweep")
+    make_fig11(args.output)
+
+    print("[12/12] Figure 12: Q₀ Initialization Sweep")
+    make_fig12(args.output)
+
+    print(f"\nDone. 12 figures saved to: {args.output}/")
 
 
 if __name__ == "__main__":

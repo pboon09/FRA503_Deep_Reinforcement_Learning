@@ -133,8 +133,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     n_episodes              = shared_cfg["n_episodes"]
     start_epsilon           = shared_cfg["start_epsilon"]
     epsilon_decay           = shared_cfg["epsilon_decay"]
+    epsilon_decay_mode      = shared_cfg.get("epsilon_decay_mode", "per_episode")  # per_episode | per_step | fixed
     final_epsilon           = shared_cfg["final_epsilon"]
     discount                = shared_cfg["discount"]
+    q_init                  = shared_cfg.get("q_init", 0.0)
 
     # Allow algorithm-specific override, fallback to shared if not defined
     learning_rate = algo_cfg.get("learning_rate", shared_cfg.get("learning_rate", 0.1))
@@ -152,6 +154,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 epsilon_decay=epsilon_decay,
                 final_epsilon=final_epsilon,
                 discount_factor=discount,
+                q_init=q_init,
             )
         case "SARSA":
             from RL_Algorithm.Algorithm.SARSA import SARSA
@@ -164,6 +167,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 epsilon_decay=epsilon_decay,
                 final_epsilon=final_epsilon,
                 discount_factor=discount,
+                q_init=q_init,
             )
         case "Q_Learning":
             from RL_Algorithm.Algorithm.Q_Learning import Q_Learning
@@ -176,6 +180,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 epsilon_decay=epsilon_decay,
                 final_epsilon=final_epsilon,
                 discount_factor=discount,
+                q_init=q_init,
             )
         case "Double_Q_Learning":
             from RL_Algorithm.Algorithm.Double_Q_Learning import Double_Q_Learning
@@ -188,6 +193,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 epsilon_decay=epsilon_decay,
                 final_epsilon=final_epsilon,
                 discount_factor=discount,
+                q_init=q_init,
             )
 
     # ---- CSV logging setup ----
@@ -419,11 +425,16 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                         log_step(total_episodes, global_step, ep_steps_snapshot,
                                  obs_i, obs_dis_list[i], action_indices[i],
                                  action_vals[i], ep_return_snapshot)
-                        agent.decay_epsilon()
+                        if epsilon_decay_mode == "per_episode":
+                            agent.decay_epsilon()
 
                     # Track env-0 for entropy calculation
                     if i == 0:
                         recent_actions.append(action_indices[i])
+
+                # ---- Per-step epsilon decay ----
+                if epsilon_decay_mode == "per_step":
+                    agent.decay_epsilon()
 
                 # ---- Progress bar update ----
                 if ep_completed_this_step > 0:

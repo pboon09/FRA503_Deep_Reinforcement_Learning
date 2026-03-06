@@ -13,6 +13,7 @@ class SARSA(BaseAlgorithm):
             epsilon_decay: float,
             final_epsilon: float,
             discount_factor: float,
+            q_init: float = 0.0,
     ) -> None:
         """
         Initialize the SARSA algorithm.
@@ -26,6 +27,7 @@ class SARSA(BaseAlgorithm):
             epsilon_decay (float): Rate at which epsilon decays.
             final_epsilon (float): Minimum value for epsilon.
             discount_factor (float): Discount factor for future rewards.
+            q_init (float): Initial Q-value for all state-action pairs.
         """
         super().__init__(
             control_type=ControlType.TEMPORAL_DIFFERENCE,
@@ -37,6 +39,7 @@ class SARSA(BaseAlgorithm):
             epsilon_decay=epsilon_decay,
             final_epsilon=final_epsilon,
             discount_factor=discount_factor,
+            q_init=q_init,
         )
         
     def update(
