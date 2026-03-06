@@ -254,7 +254,7 @@ def aggregate_v_surface(qtable, dim_x, dim_y):
     return np.array(xs), np.array(ys), v_grid
 
 
-def aggregate_policy(qtable, dim_x, dim_y, action_range=(-10.0, 10.0)):
+def aggregate_policy(qtable, dim_x, dim_y, action_range=(-5.0, 5.0)):
     from collections import Counter
     action_map = {}
     n_actions = 0
@@ -430,8 +430,8 @@ def make_fig5(output_dir: str):
 def make_fig6(output_dir: str):
     traj_dir = os.path.join(ROOT, "experiments", "suite_4_deployment", "trajectories")
 
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-    fig.suptitle("Deployment Phase Portraits (Best Episode, ε=0)",
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    fig.suptitle("Deployment Phase Portraits — Best Episode (ε=0)",
                  fontsize=14, fontweight="bold")
 
     for idx, algo in enumerate(ALGOS):
@@ -448,27 +448,130 @@ def make_fig6(output_dir: str):
 
         df = pd.read_csv(csv_path)
         ep_rewards = df.groupby("episode")["reward"].sum()
+        n_eps = len(ep_rewards)
+
+        # Select best episode
         best_ep = ep_rewards.idxmax()
-        ep_df = df[df["episode"] == best_ep]
+        med_df = df[df["episode"] == best_ep]
+        steps = np.arange(len(med_df))
+        theta = med_df["pole_angle"].values
+        dtheta = med_df["pole_vel"].values
 
-        # Scatter colored by time step
-        steps = np.arange(len(ep_df))
-        sc = ax.scatter(ep_df["pole_angle"], ep_df["pole_vel"],
-                        c=steps, cmap="viridis", s=10, alpha=0.8)
-        ax.plot(ep_df["pole_angle"], ep_df["pole_vel"],
-                linewidth=0.5, alpha=0.3, color="gray")
-        fig.colorbar(sc, ax=ax, label="Time step", shrink=0.8)
+        # Color-coded by timestep
+        sc = ax.scatter(theta, dtheta, c=steps, cmap="viridis",
+                        s=10, alpha=0.85, zorder=5)
+        ax.plot(theta, dtheta, linewidth=0.5, alpha=0.3, color="gray",
+                zorder=4)
 
-        ax.axhline(0, color="k", linewidth=0.5, alpha=0.4)
-        ax.axvline(0, color="k", linewidth=0.5, alpha=0.4)
+        # Start / end markers
+        ax.scatter(theta[0], dtheta[0], color="lime", s=80, marker="o",
+                   edgecolors="k", linewidths=1.0, zorder=10, label="Start")
+        ax.scatter(theta[-1], dtheta[-1], color="red", s=80, marker="X",
+                   edgecolors="k", linewidths=1.0, zorder=10, label="End")
+
+        fig.colorbar(sc, ax=ax, label="Timestep", shrink=0.8)
+
+        ax.axhline(0, color="k", linewidth=0.5, alpha=0.3)
+        ax.axvline(0, color="k", linewidth=0.5, alpha=0.3)
         ax.set_xlabel("Pole Angle (rad)")
-        ax.set_ylabel("Pole Ang. Velocity (rad/s)")
-        ax.set_title(f"{ALGO_DISPLAY[algo]} (ep {best_ep}, "
-                     f"R={ep_rewards[best_ep]:.1f})")
-        ax.grid(True, alpha=0.3)
+        ax.set_ylabel("Angular Velocity (rad/s)")
+        ax.set_title(f"{ALGO_DISPLAY[algo]}  "
+                     f"({len(med_df)} steps, R={ep_rewards.mean():.0f})",
+                     fontsize=11, fontweight="bold")
+        ax.legend(fontsize=7, loc="upper right")
+        ax.grid(True, alpha=0.2)
 
     fig.tight_layout()
     path = os.path.join(output_dir, "fig6_deployment.png")
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: {path}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Figure 7: 3D Q-Value Surface (2×2)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def make_fig7(output_dir: str):
+    fig = plt.figure(figsize=(16, 12))
+    fig.suptitle("3D Q-Value Surface",
+                 fontsize=14, fontweight="bold")
+
+    for idx, algo in enumerate(ALGOS):
+        qtable_path = os.path.join(
+            ROOT, "experiments", "suite_1_baseline", f"{algo}.json")
+        if not os.path.isfile(qtable_path):
+            print(f"  WARNING: Missing {qtable_path}")
+            continue
+        qtable = load_qtable(qtable_path)
+
+        xs, ys, v_grid = aggregate_v_surface(qtable, DIM_POLE_ANG, DIM_POLE_VEL)
+        if xs.size == 0:
+            continue
+
+        v_filled = np.nan_to_num(v_grid, nan=0.0)
+        X, Y = np.meshgrid(xs, ys)
+
+        ax = fig.add_subplot(2, 2, idx + 1, projection="3d")
+        surf = ax.plot_surface(X, Y, v_filled, cmap="viridis",
+                               edgecolor="none", alpha=0.9)
+        fig.colorbar(surf, ax=ax, label="V(s)", shrink=0.55, pad=0.1)
+
+        ax.set_xlabel("Pole Angle (rad)", fontsize=9, labelpad=8)
+        ax.set_ylabel("Pole Ang. Vel. (rad/s)", fontsize=9, labelpad=8)
+        ax.set_zlabel("V(s)", fontsize=9, labelpad=6)
+        ax.set_title(ALGO_DISPLAY[algo], fontsize=12, fontweight="bold")
+        ax.view_init(elev=30, azim=-45)
+        ax.tick_params(labelsize=7)
+
+    fig.tight_layout()
+    path = os.path.join(output_dir, "fig7_q_surface.png")
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: {path}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Figure 8: 3D Policy Surface (2×2)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def make_fig8(output_dir: str):
+    fig = plt.figure(figsize=(16, 12))
+    fig.suptitle("3D Policy Surface",
+                 fontsize=14, fontweight="bold")
+
+    for idx, algo in enumerate(ALGOS):
+        qtable_path = os.path.join(
+            ROOT, "experiments", "suite_1_baseline", f"{algo}.json")
+        if not os.path.isfile(qtable_path):
+            print(f"  WARNING: Missing {qtable_path}")
+            continue
+        qtable = load_qtable(qtable_path)
+
+        xs, ys, force_grid, a_range = aggregate_policy(
+            qtable, DIM_POLE_ANG, DIM_POLE_VEL)
+        if xs.size == 0:
+            continue
+
+        force_filled = np.nan_to_num(force_grid, nan=0.0)
+        X, Y = np.meshgrid(xs, ys)
+
+        ax = fig.add_subplot(2, 2, idx + 1, projection="3d")
+        cmap_obj = cm.get_cmap("RdYlGn")
+        surf = ax.plot_surface(X, Y, force_filled, cmap=cmap_obj,
+                               vmin=a_range[0], vmax=a_range[1],
+                               edgecolor="none", alpha=0.9)
+        fig.colorbar(surf, ax=ax, label="Force (N)", shrink=0.55, pad=0.1)
+
+        ax.set_xlabel("Pole Angle (rad)", fontsize=9, labelpad=8)
+        ax.set_ylabel("Pole Ang. Vel. (rad/s)", fontsize=9, labelpad=8)
+        ax.set_zlabel("Force (N)", fontsize=9, labelpad=6)
+        ax.set_title(ALGO_DISPLAY[algo], fontsize=12, fontweight="bold")
+        ax.view_init(elev=30, azim=-45)
+        ax.tick_params(labelsize=7)
+
+    fig.tight_layout()
+    path = os.path.join(output_dir, "fig8_policy_surface.png")
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  Saved: {path}")
@@ -491,27 +594,33 @@ def main():
     args = parse_args()
     os.makedirs(args.output, exist_ok=True)
 
-    print(f"Generating 6 report figures → {args.output}/\n")
+    print(f"Generating 8 report figures → {args.output}/\n")
 
-    print("[1/6] Figure 1: Exploration Feedback Loop")
+    print("[1/8] Figure 1: Exploration Feedback Loop")
     make_fig1(args.output)
 
-    print("[2/6] Figure 2: Credit Assignment Bottleneck")
+    print("[2/8] Figure 2: Credit Assignment Bottleneck")
     make_fig2(args.output)
 
-    print("[3/6] Figure 3: Representation Structure")
+    print("[3/8] Figure 3: Representation Structure")
     make_fig3(args.output)
 
-    print("[4/6] Figure 4: Action Resolution Sweep")
+    print("[4/8] Figure 4: Action Resolution Sweep")
     make_fig4(args.output)
 
-    print("[5/6] Figure 5: State Resolution Sweep")
+    print("[5/8] Figure 5: State Resolution Sweep")
     make_fig5(args.output)
 
-    print("[6/6] Figure 6: Deployment Phase Portraits")
+    print("[6/8] Figure 6: Deployment Phase Portraits")
     make_fig6(args.output)
 
-    print(f"\nDone. 6 figures saved to: {args.output}/")
+    print("[7/8] Figure 7: 3D Q-Value Surface")
+    make_fig7(args.output)
+
+    print("[8/8] Figure 8: 3D Policy Surface")
+    make_fig8(args.output)
+
+    print(f"\nDone. 8 figures saved to: {args.output}/")
 
 
 if __name__ == "__main__":
