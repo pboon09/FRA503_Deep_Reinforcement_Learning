@@ -127,15 +127,21 @@ def make_fig1(output_dir: str):
         ax1.fill_between(ep["episode"], smooth - std, smooth + std,
                          alpha=0.15, color=color)
 
-        # Right: State Coverage
+        # Right: State Coverage (accumulated per episode)
         if all(c in df.columns for c in state_cols):
-            tuples = list(df[state_cols].itertuples(index=False, name=None))
             seen = set()
-            cumulative = []
-            for t in tuples:
-                seen.add(t)
-                cumulative.append(len(seen))
-            ax2.plot(progress_pct(df), cumulative,
+            ep_ids = []
+            ep_counts = []
+            for _, row in df.iterrows():
+                state = tuple(row[c] for c in state_cols)
+                seen.add(state)
+                ep_id = row["episode"]
+                if not ep_ids or ep_ids[-1] != ep_id:
+                    ep_ids.append(ep_id)
+                    ep_counts.append(len(seen))
+                else:
+                    ep_counts[-1] = len(seen)
+            ax2.plot(ep_ids, ep_counts,
                      label=label, linewidth=1.8, color=color)
 
     ax1.set_title("(a) Episode Total Reward")
@@ -146,7 +152,7 @@ def make_fig1(output_dir: str):
     ax1.set_ylim(bottom=0)
 
     ax2.set_title("(b) Cumulative Unique States Visited")
-    ax2.set_xlabel("Training Progress (%)")
+    ax2.set_xlabel("Episode")
     ax2.set_ylabel("Unique States")
     ax2.legend(fontsize=9)
     ax2.grid(True, alpha=0.3)
