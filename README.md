@@ -16,11 +16,11 @@ Edit `scripts/RL_Algorithm/configs/rl_config.json`:
 | Parameter                  | Default      | Description                                                   |
 | -------------------------- | ------------ | ------------------------------------------------------------- |
 | `num_of_action`            | 5            | Number of discrete actions                                    |
-| `action_range`             | [-5.0, 5.0]  | Continuous force range                                        |
+| `action_range`             | [-5.0, 5.0]  | Continuous force range (N)                                    |
 | `discretize_state_weight`  | [1, 8, 1, 8] | State discretization weights for [x, x_dot, theta, theta_dot] |
-| `n_episodes`               | 10000        | Total training episodes                                       |
+| `n_episodes`               | 20000        | Total training episodes                                       |
 | `start_epsilon`            | 1.0          | Initial exploration rate                                      |
-| `epsilon_decay`            | 0.999        | Per-step decay rate                                           |
+| `epsilon_decay`            | 0.9995       | Per-step decay rate                                           |
 | `final_epsilon`            | 0.01         | Minimum epsilon                                               |
 | `discount`                 | 0.99         | Discount factor (gamma)                                       |
 
@@ -45,18 +45,33 @@ Replace `MC` with `SARSA`, `Q_Learning`, or `Double_Q_Learning`.
 Outputs:
 
 - CSV log: `logs/Stabilize/<algorithm>/training_log_*.csv`
-- Q-table: `q_value/Stabilize/<algorithm>/<algorithm>_10000_*.json`
+- Q-table: `q_value/Stabilize/<algorithm>/<algorithm>_20000_*.json`
 
 ## Play (Deploy Trained Policy)
 
 ```bash
-RL_ALGORITHM=MC python scripts/RL_Algorithm/play.py \
-    --task Stabilize-Isaac-Cartpole-v0 --num_envs 1
+python scripts/RL_Algorithm/play.py \
+    --task Stabilize-Isaac-Cartpole-v0 \
+    --algorithm MC \
+    --qtable_path experiments/suite_1_baseline/MC.json \
+    --num_episodes 10 \
+    --output_csv evaluation_results.csv
 
 # With video recording
-RL_ALGORITHM=MC python scripts/RL_Algorithm/play.py \
-    --task Stabilize-Isaac-Cartpole-v0 --num_envs 1 \
-    --video --video_length 1000 --video_dir videos/MC
+python scripts/RL_Algorithm/play.py \
+    --task Stabilize-Isaac-Cartpole-v0 \
+    --algorithm MC \
+    --qtable_path experiments/suite_1_baseline/MC.json \
+    --num_episodes 10 \
+    --video --video_dir videos/MC
+
+# With trajectory logging (for phase portrait plots)
+python scripts/RL_Algorithm/play.py \
+    --task Stabilize-Isaac-Cartpole-v0 \
+    --algorithm MC \
+    --qtable_path experiments/suite_1_baseline/MC.json \
+    --num_episodes 10 \
+    --trajectory_dir trajectories/
 ```
 
 ## Run All Experiments (Single Command)
@@ -67,77 +82,70 @@ python run_experiments.py
 
 This runs all 4 suites automatically:
 
-| Suite                 | What It Does                               | Output                            |
-| --------------------- | ------------------------------------------ | --------------------------------- |
-| 1 — Baseline          | Train 4 algorithms with default config     | `experiments/suite_1_baseline/`   |
-| 2 — Action Resolution | Train 4 algos x {5, 25, 50} actions       | `experiments/suite_2_action/`     |
-| 3 — State Resolution  | Train 4 algos x {low, mid, high} weights   | `experiments/suite_3_state/`      |
-| 4 — Deployment        | Evaluate each baseline Q-table (epsilon=0) | `experiments/suite_4_deployment/` |
+| Suite                 | What It Does                                        | Output                            |
+| --------------------- | --------------------------------------------------- | --------------------------------- |
+| 1 - Baseline          | Train 4 algorithms with default config              | `experiments/suite_1_baseline/`   |
+| 2 - Action Resolution | Train 4 algos x {3, 5, 11, 21} actions              | `experiments/suite_2_action/`     |
+| 3 - State Resolution  | Train 4 algos x {[1,4,1,4], [1,8,1,8], [2,16,2,16]} | `experiments/suite_3_state/`      |
+| 4 - Deployment        | Evaluate each baseline Q-table (epsilon=0) + video  | `experiments/suite_4_deployment/` |
+
+After all suites complete, report figures are generated automatically via `plot_report_figures.py`.
 
 ## Visualize
 
 ```bash
-# Training curves (single algorithm)
-python scripts/RL_Algorithm/visualize/plot_training.py \
-    --logs "logs/Stabilize/MC/training_log_*.csv" \
-    --output figures/
-
-# Training curves (compare all)
-python scripts/RL_Algorithm/visualize/plot_training.py \
-    --logs "logs/Stabilize/MC/training_log_*.csv" \
-           "logs/Stabilize/SARSA/training_log_*.csv" \
-           "logs/Stabilize/Q_Learning/training_log_*.csv" \
-           "logs/Stabilize/Double_Q_Learning/training_log_*.csv" \
-    --output figures/
-
-# Q-table surface + policy heatmap
-python scripts/RL_Algorithm/visualize/plot_q_surface.py \
-    --qtable "q_value/Stabilize/MC/MC_10000_*.json" \
-    --output figures/
-
-# Deployment bar charts
-python scripts/RL_Algorithm/visualize/plot_deployment.py \
-    --csv experiments/suite_4_deployment/evaluation_results.csv \
-    --output figures/suite_4_deployment/
-
-# TensorBoard
-tensorboard --logdir logs/Stabilize/
+# Generate all 8 report figures at once
+python scripts/RL_Algorithm/visualize/plot_report_figures.py --output figures/
 ```
+
+This generates:
+
+| Figure                       | Content                                          |
+| ---------------------------- | ------------------------------------------------ |
+| `fig1_feedback_loop.png`     | 1x2: Total Reward + State Coverage               |
+| `fig2_credit_assignment.png` | 1x2: Max Q-value + TD Error                      |
+| `fig3_representation.png`    | 2x2: Value heatmaps + Policy heatmaps            |
+| `fig4_action_sweep.png`      | 2x2: Action resolution per algorithm              |
+| `fig5_state_sweep.png`       | 2x2: State resolution per algorithm               |
+| `fig6_deployment.png`        | 2x2: Phase portraits (deployment, best episode)  |
+| `fig7_q_surface.png`         | 3D Q-value surfaces per algorithm                 |
+| `fig8_policy_surface.png`    | 3D Policy surfaces per algorithm                  |
 
 ## Results
 
 ```
 experiments/
 ├── suite_1_baseline/          # 4 CSVs + 4 Q-table JSONs
-├── suite_2_action/            # 12 CSVs + 12 JSONs (4 algos x 3 action configs)
+├── suite_2_action/            # 16 CSVs + 16 JSONs (4 algos x 4 action configs)
 ├── suite_3_state/             # 12 CSVs + 12 JSONs (4 algos x 3 weight configs)
 └── suite_4_deployment/
-    └── evaluation_results.csv # Mean reward & length per algorithm
+    ├── evaluation_results.csv # Mean reward & length per algorithm
+    ├── videos/<algorithm>/    # Recorded evaluation videos
+    └── trajectories/          # Per-step trajectory CSVs
 
 figures/
-├── suite_1_baseline/
-│   ├── comparison/            # reward_curve, episode_length, epsilon_decay, etc.
-│   ├── <algorithm>/           # Per-algorithm heatmaps
-│   └── q_surface/<algorithm>/ # 3D Q-surface, policy heatmaps
-├── suite_2_action/
-│   ├── comparison/            # Cross-algorithm-action comparison plots
-│   └── <algorithm>_act_<N>/   # Per-config plots
-├── suite_3_state/
-│   ├── comparison/            # Cross-algorithm-weight comparison plots
-│   └── <algorithm>_<weight>/  # Per-config plots
-└── suite_4_deployment/        # deployment_summary.png, bar charts
-
-q_value/Stabilize/<algorithm>/ # Trained Q-tables (JSON)
+├── fig1_feedback_loop.png
+├── fig2_credit_assignment.png
+├── fig3_representation.png
+├── fig4_action_sweep.png
+├── fig5_state_sweep.png
+├── fig6_deployment.png
+├── fig7_q_surface.png
+└── fig8_policy_surface.png
 ```
 
 ## Project Structure
 
-| File / Folder | Purpose |
-|---------------|---------|
-| `scripts/RL_Algorithm/train.py` | Training loop |
-| `scripts/RL_Algorithm/play.py` | Deployment / video recording |
-| `scripts/RL_Algorithm/configs/rl_config.json` | Hyperparameters |
-| `scripts/RL_Algorithm/visualize/` | Plotting scripts |
-| `source/CartPole/CartPole/tasks/` | IsaacLab task definition (reward, termination) |
-| `run_experiments.py` | Automated 4-suite experiment runner |
-| `RL_Algorithm/` | Algorithm implementations (MC, SARSA, Q_Learning, Double_Q_Learning) |
+| File / Folder                                      | Purpose                                            |
+| -------------------------------------------------- | -------------------------------------------------- |
+| `scripts/RL_Algorithm/train.py`                    | Training loop (algorithm selected via `RL_ALGORITHM` env var) |
+| `scripts/RL_Algorithm/play.py`                     | Deployment evaluation (epsilon=0, video, trajectories) |
+| `scripts/RL_Algorithm/configs/rl_config.json`      | Hyperparameters                                    |
+| `scripts/RL_Algorithm/visualize/plot_report_figures.py` | Generate all report figures                   |
+| `RL_Algorithm/Algorithm/MC.py`                     | Monte Carlo (first-visit)                          |
+| `RL_Algorithm/Algorithm/SARSA.py`                  | SARSA (on-policy TD)                               |
+| `RL_Algorithm/Algorithm/Q_Learning.py`             | Q-Learning (off-policy TD)                         |
+| `RL_Algorithm/Algorithm/Double_Q_Learning.py`      | Double Q-Learning                                  |
+| `RL_Algorithm/RL_base.py`                          | Base class for tabular algorithms                  |
+| `source/CartPole/CartPole/tasks/`                  | IsaacLab task definition (reward, termination, MDP) |
+| `run_experiments.py`                               | Automated 4-suite experiment runner + figure generation |
