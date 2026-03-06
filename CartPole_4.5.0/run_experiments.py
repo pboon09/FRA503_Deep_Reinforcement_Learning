@@ -25,10 +25,6 @@ import sys
 ROOT = os.path.dirname(os.path.abspath(__file__))
 TRAIN_SCRIPT = os.path.join(ROOT, "scripts", "RL_Algorithm", "train.py")
 PLAY_SCRIPT = os.path.join(ROOT, "scripts", "RL_Algorithm", "play.py")
-PLOT_TRAINING = os.path.join(ROOT, "scripts", "RL_Algorithm", "visualize", "plot_training.py")
-PLOT_Q_SURFACE = os.path.join(ROOT, "scripts", "RL_Algorithm", "visualize", "plot_q_surface.py")
-PLOT_DEPLOYMENT = os.path.join(ROOT, "scripts", "RL_Algorithm", "visualize", "plot_deployment.py")
-PLOT_ANALYSIS = os.path.join(ROOT, "scripts", "RL_Algorithm", "visualize", "plot_analysis.py")
 PLOT_REPORT = os.path.join(ROOT, "scripts", "RL_Algorithm", "visualize", "plot_report_figures.py")
 CONFIG_PATH = os.path.join(ROOT, "scripts", "RL_Algorithm", "configs", "rl_config.json")
 
