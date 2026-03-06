@@ -29,6 +29,7 @@ PLOT_TRAINING = os.path.join(ROOT, "scripts", "RL_Algorithm", "visualize", "plot
 PLOT_Q_SURFACE = os.path.join(ROOT, "scripts", "RL_Algorithm", "visualize", "plot_q_surface.py")
 PLOT_DEPLOYMENT = os.path.join(ROOT, "scripts", "RL_Algorithm", "visualize", "plot_deployment.py")
 PLOT_ANALYSIS = os.path.join(ROOT, "scripts", "RL_Algorithm", "visualize", "plot_analysis.py")
+PLOT_REPORT = os.path.join(ROOT, "scripts", "RL_Algorithm", "visualize", "plot_report_figures.py")
 CONFIG_PATH = os.path.join(ROOT, "scripts", "RL_Algorithm", "configs", "rl_config.json")
 
 TASK = "Stabilize-Isaac-Cartpole-v0"
@@ -162,22 +163,6 @@ def collect_qtable_named(algo: str, dest_dir: str, dest_name: str):
     return dest
 
 
-def run_plots(csv_paths: list, qtable_paths: list, figures_dir: str):
-    """Generate training and Q-surface plots for a set of experiments."""
-    if csv_paths:
-        os.makedirs(figures_dir, exist_ok=True)
-        cmd = [sys.executable, PLOT_TRAINING, "--logs"] + csv_paths + ["--output", figures_dir]
-        print(f"\n  PLOT TRAINING -> {figures_dir}/")
-        subprocess.run(cmd, cwd=ROOT)
-
-    if qtable_paths:
-        q_fig_dir = os.path.join(figures_dir, "q_surface")
-        os.makedirs(q_fig_dir, exist_ok=True)
-        cmd = [sys.executable, PLOT_Q_SURFACE, "--qtable"] + qtable_paths + ["--output", q_fig_dir]
-        print(f"\n  PLOT Q-SURFACE -> {q_fig_dir}/")
-        subprocess.run(cmd, cwd=ROOT)
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
@@ -196,7 +181,6 @@ def main():
     print(f"{'#'*60}")
 
     suite1_dir = os.path.join(ROOT, "experiments", "suite_1_baseline")
-    suite1_fig = os.path.join(ROOT, "figures", "suite_1_baseline")
     suite1_csvs = []
     suite1_qtables = []
 
@@ -212,15 +196,12 @@ def main():
         if qt_path:
             suite1_qtables.append(qt_path)
 
-    run_plots(suite1_csvs, suite1_qtables, suite1_fig)
-
     # ── Suite 2: Action Resolution (all algos, num_of_action sweep) ──────
     print(f"\n{'#'*60}")
     print("  SUITE 2: Action Resolution")
     print(f"{'#'*60}")
 
     suite2_dir = os.path.join(ROOT, "experiments", "suite_2_action")
-    suite2_fig = os.path.join(ROOT, "figures", "suite_2_action")
     suite2_csvs = []
     suite2_qtables = []
 
@@ -261,15 +242,12 @@ def main():
         finally:
             restore_config(original)
 
-    run_plots(suite2_csvs, suite2_qtables, suite2_fig)
-
     # ── Suite 3: State Resolution (all algos, discretize_state_weight sweep)
     print(f"\n{'#'*60}")
     print("  SUITE 3: State Resolution")
     print(f"{'#'*60}")
 
     suite3_dir = os.path.join(ROOT, "experiments", "suite_3_state")
-    suite3_fig = os.path.join(ROOT, "figures", "suite_3_state")
     suite3_csvs = []
     suite3_qtables = []
 
@@ -315,15 +293,12 @@ def main():
         finally:
             restore_config(original)
 
-    run_plots(suite3_csvs, suite3_qtables, suite3_fig)
-
     # ── Suite 4: Deployment Evaluation (play.py with Suite 1 Q-tables) ───
     print(f"\n{'#'*60}")
     print("  SUITE 4: Deployment Evaluation")
     print(f"{'#'*60}")
 
     suite4_dir = os.path.join(ROOT, "experiments", "suite_4_deployment")
-    suite4_fig = os.path.join(ROOT, "figures", "suite_4_deployment")
     suite4_video_dir = os.path.join(suite4_dir, "videos")
     suite4_traj_dir = os.path.join(suite4_dir, "trajectories")
     os.makedirs(suite4_dir, exist_ok=True)
@@ -343,23 +318,16 @@ def main():
                  video=True, video_dir=algo_video_dir,
                  trajectory_dir=suite4_traj_dir)
 
-    # Generate deployment bar charts
-    if os.path.isfile(eval_csv):
-        print(f"\n  Evaluation results: {eval_csv}")
-        os.makedirs(suite4_fig, exist_ok=True)
-        plot_cmd = [sys.executable, PLOT_DEPLOYMENT,
-                    "--csv", eval_csv, "--output", suite4_fig]
-        print(f"  PLOT DEPLOYMENT -> {suite4_fig}/")
-        subprocess.run(plot_cmd, cwd=ROOT)
+    # ── Report Figures (6 composite figures) ─────────────────────────────
+    print(f"\n{'#'*60}")
+    print("  REPORT FIGURES (6 composite figures)")
+    print(f"{'#'*60}")
 
-    # Generate deployment trajectory analysis (phase portraits, stability, etc.)
-    traj_files = glob.glob(os.path.join(suite4_traj_dir, "*_trajectory.csv"))
-    if traj_files:
-        os.makedirs(suite4_fig, exist_ok=True)
-        plot_cmd = [sys.executable, PLOT_ANALYSIS,
-                    "--trajectories"] + sorted(traj_files) + ["--output", suite4_fig]
-        print(f"  PLOT ANALYSIS -> {suite4_fig}/")
-        subprocess.run(plot_cmd, cwd=ROOT)
+    figures_dir = os.path.join(ROOT, "figures")
+    os.makedirs(figures_dir, exist_ok=True)
+    report_cmd = [sys.executable, PLOT_REPORT, "--output", figures_dir]
+    print(f"  PLOT REPORT -> {figures_dir}/")
+    subprocess.run(report_cmd, cwd=ROOT)
 
     # ── Summary ──────────────────────────────────────────────────────────
     print("\n" + "=" * 60)
@@ -368,7 +336,7 @@ def main():
     print(f"  Suite 2 (Action Res):  {suite2_dir}/")
     print(f"  Suite 3 (State Res):   {suite3_dir}/")
     print(f"  Suite 4 (Deployment):  {suite4_dir}/")
-    print(f"  Figures:               {os.path.join(ROOT, 'figures')}/")
+    print(f"  Figures:               {figures_dir}/")
     print("=" * 60)
 
 
