@@ -388,18 +388,18 @@ def main():
 
     suite6_dir = os.path.join(ROOT, "experiments", "suite_6_epsilon")
 
-    # Copy baseline as eps_per_episode_0.9995 reference
+    # Copy baseline as eps_per_step_0.9995 reference
     for algo in ALL_ALGOS:
         baseline_csv = os.path.join(suite1_dir, f"{algo}.csv")
         baseline_qt = os.path.join(suite1_dir, f"{algo}.json")
         if os.path.isfile(baseline_csv):
             os.makedirs(suite6_dir, exist_ok=True)
-            dest = os.path.join(suite6_dir, f"{algo}_per_episode_0.9995.csv")
+            dest = os.path.join(suite6_dir, f"{algo}_per_step_0.9995.csv")
             shutil.copy2(baseline_csv, dest)
             print(f"  Copied baseline -> {dest}")
         if os.path.isfile(baseline_qt):
             os.makedirs(suite6_dir, exist_ok=True)
-            dest = os.path.join(suite6_dir, f"{algo}_per_episode_0.9995.json")
+            dest = os.path.join(suite6_dir, f"{algo}_per_step_0.9995.json")
             shutil.copy2(baseline_qt, dest)
             print(f"  Copied baseline -> {dest}")
 

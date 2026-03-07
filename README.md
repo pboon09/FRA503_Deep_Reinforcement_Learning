@@ -13,16 +13,18 @@ cd ~/FRA503_Deep_Reinforcement_Learning/CartPole_4.5.0
 
 Edit `scripts/RL_Algorithm/configs/rl_config.json`:
 
-| Parameter                  | Default      | Description                                                   |
-| -------------------------- | ------------ | ------------------------------------------------------------- |
-| `num_of_action`            | 5            | Number of discrete actions                                    |
-| `action_range`             | [-5.0, 5.0]  | Continuous force range (N)                                    |
-| `discretize_state_weight`  | [1, 8, 1, 8] | State discretization weights for [x, x_dot, theta, theta_dot] |
-| `n_episodes`               | 20000        | Total training episodes                                       |
-| `start_epsilon`            | 1.0          | Initial exploration rate                                      |
-| `epsilon_decay`            | 0.9995       | Per-step decay rate                                           |
-| `final_epsilon`            | 0.01         | Minimum epsilon                                               |
-| `discount`                 | 0.99         | Discount factor (gamma)                                       |
+| Parameter                  | Default          | Description                                                   |
+| -------------------------- | ---------------- | ------------------------------------------------------------- |
+| `num_of_action`            | 5                | Number of discrete actions                                    |
+| `action_range`             | [-5.0, 5.0]      | Continuous force range (N)                                    |
+| `discretize_state_weight`  | [1, 8, 1, 8]     | State discretization weights for [x, theta, x_dot, theta_dot] |
+| `n_episodes`               | 20000            | Total training episodes                                       |
+| `start_epsilon`            | 1.0              | Initial exploration rate                                      |
+| `epsilon_decay`            | 0.9995           | Decay rate applied per episode or per step                    |
+| `epsilon_decay_mode`       | per_step         | Decay mode: `per_step`, `per_episode`, or `fixed`             |
+| `final_epsilon`            | 0.01             | Minimum epsilon                                               |
+| `discount`                 | 0.99             | Discount factor (gamma)                                       |
+| `q_init`                   | 0.0              | Initial Q-value for all state-action pairs                    |
 
 Per-algorithm learning rates are under `algorithms`:
 
@@ -82,16 +84,16 @@ python run_experiments.py
 
 This runs all 8 suites automatically:
 
-| Suite                  | What It Does                                         | Output                            |
-| ---------------------- | ---------------------------------------------------- | --------------------------------- |
-| 1 - Baseline           | Train 4 algorithms with default config               | `experiments/suite_1_baseline/`   |
-| 2 - Action Resolution  | Train 4 algos x {3, 5, 11, 21} actions               | `experiments/suite_2_action/`     |
-| 3 - State Resolution   | Train 4 algos x {[1,4,1,4], [1,8,1,8], [2,16,2,16]} | `experiments/suite_3_state/`      |
-| 4 - Deployment         | Evaluate each baseline Q-table (epsilon=0) + video   | `experiments/suite_4_deployment/` |
-| 5 - Learning Rate      | Train 4 algos x {0.01, 0.05, 0.1, 0.3, 0.5, 0.9}   | `experiments/suite_5_lr/`         |
-| 6 - Epsilon Schedule   | Per-step / per-episode / fixed decay modes            | `experiments/suite_6_epsilon/`    |
-| 7 - Discount Factor    | Train 4 algos x {0.9, 0.95, 0.99, 0.999, 1.0}       | `experiments/suite_7_gamma/`      |
-| 8 - Q₀ Initialization  | Train 4 algos x {0, 10, 50, 100}                     | `experiments/suite_8_q_init/`     |
+| Suite                  | What It Does                                                        | Output                            |
+| ---------------------- | ------------------------------------------------------------------- | --------------------------------- |
+| 1 - Baseline           | Train 4 algorithms with default config                              | `experiments/suite_1_baseline/`   |
+| 2 - Action Resolution  | Train 4 algos x {3, 5, 11, 21} actions                             | `experiments/suite_2_action/`     |
+| 3 - State Resolution   | Train 4 algos x {[1,4,1,4], [1,8,1,8], [2,16,2,16]}               | `experiments/suite_3_state/`      |
+| 4 - Deployment         | Evaluate each baseline Q-table (epsilon=0) + video + trajectories   | `experiments/suite_4_deployment/` |
+| 5 - Learning Rate      | Train 4 algos x {0.01, 0.05, 0.1, 0.3, 0.5, 0.9}                  | `experiments/suite_5_lr/`         |
+| 6 - Epsilon Schedule   | 3 per-step + 2 per-episode + 1 fixed decay configs                  | `experiments/suite_6_epsilon/`    |
+| 7 - Discount Factor    | Train 4 algos x {0.9, 0.95, 0.99, 0.999, 1.0}                     | `experiments/suite_7_gamma/`      |
+| 8 - Q-init             | Train 4 algos x {0, 10, 50, 100}                                   | `experiments/suite_8_q_init/`     |
 
 After all suites complete, report figures are generated automatically via `plot_report_figures.py`.
 
@@ -107,17 +109,17 @@ This generates:
 | Figure                       | Content                                          |
 | ---------------------------- | ------------------------------------------------ |
 | `fig1_feedback_loop.png`     | 1x2: Total Reward + State Coverage               |
-| `fig2_credit_assignment.png` | 1x2: Max Q-value + TD Error                      |
+| `fig2_credit_assignment.png` | 1x2: Running Max Q-value + TD Error              |
 | `fig3_representation.png`    | 2x2: Value heatmaps + Policy heatmaps            |
-| `fig4_action_sweep.png`      | 2x2: Action resolution per algorithm              |
-| `fig5_state_sweep.png`       | 2x2: State resolution per algorithm               |
+| `fig4_action_sweep.png`      | 2x2: Action resolution per algorithm             |
+| `fig5_state_sweep.png`       | 2x2: State resolution per algorithm              |
 | `fig6_deployment.png`        | 2x2: Phase portraits (deployment, best episode)  |
-| `fig7_q_surface.png`         | 3D Q-value surfaces per algorithm                 |
-| `fig8_policy_surface.png`    | 3D Policy surfaces per algorithm                  |
-| `fig9_lr_sweep.png`          | 2x2: Learning rate sensitivity per algorithm      |
-| `fig10_epsilon_sweep.png`    | 2x2: Epsilon schedule sensitivity per algorithm   |
-| `fig11_gamma_sweep.png`      | 2x2: Discount factor sensitivity per algorithm    |
-| `fig12_q_init_sweep.png`     | 2x2: Q₀ initialization sensitivity per algorithm  |
+| `fig7_q_surface.png`         | 3D Q-value surfaces per algorithm                |
+| `fig8_policy_surface.png`    | 3D Policy surfaces per algorithm                 |
+| `fig9_lr_sweep.png`          | 2x2: Learning rate sensitivity per algorithm     |
+| `fig10_epsilon_sweep.png`    | 2x2: Epsilon schedule sensitivity per algorithm  |
+| `fig11_gamma_sweep.png`      | 2x2: Discount factor sensitivity per algorithm   |
+| `fig12_q_init_sweep.png`     | 2x2: Q-init sensitivity per algorithm            |
 
 ## Results
 
@@ -133,7 +135,7 @@ experiments/
 ├── suite_5_lr/                # 24 CSVs + 24 JSONs (4 algos x 6 LR values)
 ├── suite_6_epsilon/           # 28 CSVs + 28 JSONs (4 algos x 7 epsilon configs)
 ├── suite_7_gamma/             # 20 CSVs + 20 JSONs (4 algos x 5 gamma values)
-└── suite_8_q_init/            # 16 CSVs + 16 JSONs (4 algos x 4 Q₀ values)
+└── suite_8_q_init/            # 16 CSVs + 16 JSONs (4 algos x 4 Q-init values)
 
 figures/
 ├── fig1_feedback_loop.png
@@ -158,10 +160,10 @@ figures/
 | `scripts/RL_Algorithm/play.py`                     | Deployment evaluation (epsilon=0, video, trajectories) |
 | `scripts/RL_Algorithm/configs/rl_config.json`      | Hyperparameters                                    |
 | `scripts/RL_Algorithm/visualize/plot_report_figures.py` | Generate all report figures                   |
+| `run_experiments.py`                               | Automated 8-suite experiment runner + figure generation |
 | `RL_Algorithm/Algorithm/MC.py`                     | Monte Carlo (first-visit)                          |
 | `RL_Algorithm/Algorithm/SARSA.py`                  | SARSA (on-policy TD)                               |
 | `RL_Algorithm/Algorithm/Q_Learning.py`             | Q-Learning (off-policy TD)                         |
 | `RL_Algorithm/Algorithm/Double_Q_Learning.py`      | Double Q-Learning                                  |
 | `RL_Algorithm/RL_base.py`                          | Base class for tabular algorithms                  |
 | `source/CartPole/CartPole/tasks/`                  | IsaacLab task definition (reward, termination, MDP) |
-| `run_experiments.py`                               | Automated 4-suite experiment runner + figure generation |
