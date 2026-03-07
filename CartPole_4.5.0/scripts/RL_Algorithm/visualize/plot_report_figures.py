@@ -189,12 +189,15 @@ def make_fig2(output_dir: str):
         label = ALGO_DISPLAY[algo]
         pct = progress_pct(df)
 
-        # Left: Max Q-value
+        # Left: Running max Q-value (cumulative max per episode)
         q_cols = get_q_cols(df)
         if q_cols:
-            max_q = df[q_cols].max(axis=1)
-            smooth = rolling_mean(max_q, window)
-            ax1.plot(pct, smooth, label=label, linewidth=1.8, color=color)
+            max_q_per_step = df[q_cols].max(axis=1)
+            ep_max_q = max_q_per_step.groupby(df["episode"]).max()
+            running_max = ep_max_q.cummax()
+            ep_pct = np.linspace(0, 100, len(running_max))
+            ax1.plot(ep_pct, running_max.values, label=label,
+                     linewidth=1.8, color=color)
 
         # Right: TD Error = |r + γ·maxQ(s') - Q(s,a)|
         if q_cols:
@@ -210,7 +213,7 @@ def make_fig2(output_dir: str):
                 ax2.plot(pct_td, rolling_mean(td_series, window),
                          label=label, linewidth=1.8, color=color)
 
-    ax1.set_title("(a) Max Q-value per Step")
+    ax1.set_title("(a) Running Max Q-value")
     ax1.set_xlabel("Training Progress (%)")
     ax1.set_ylabel("Max Q-value")
     ax1.legend(fontsize=9)
@@ -218,7 +221,7 @@ def make_fig2(output_dir: str):
 
     ax2.set_title("(b) TD Error (Bellman Residual)")
     ax2.set_xlabel("Training Progress (%)")
-    ax2.set_ylabel("|r + γ·max Q(s') − Q(s,a)|")
+    ax2.set_ylabel("TD Error")
     ax2.legend(fontsize=9)
     ax2.grid(True, alpha=0.3)
 
