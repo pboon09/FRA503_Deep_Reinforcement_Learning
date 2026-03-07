@@ -209,7 +209,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         "cart_pos_dis", "pole_angle_dis", "cart_vel_dis", "pole_vel_dis",
         "action_idx", "action_val",
         "reward", "epsilon",
-    ] + q_col_names
+    ] + q_col_names + ["global_max_q"]
     csv_file = open(csv_filename, "w", newline="")
     csv_writer = csv.DictWriter(csv_file, fieldnames=csv_fieldnames)
     csv_writer.writeheader()
@@ -237,6 +237,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         }
         for i, q in enumerate(q_vals):
             row[f"q_{i}"] = float(q)
+        # Global max Q across entire Q-table
+        if agent.q_values:
+            row["global_max_q"] = float(max(max(v) for v in agent.q_values.values()))
+        else:
+            row["global_max_q"] = 0.0
         csv_writer.writerow(row)
 
     # ---- TensorBoard setup ----

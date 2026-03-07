@@ -76,13 +76,17 @@ python scripts/RL_Algorithm/play.py \
     --trajectory_dir trajectories/
 ```
 
-## Run All Experiments (Single Command)
+## Run Experiments
 
 ```bash
-python run_experiments.py
+python run_experiments.py              # run ALL suites
+python run_experiments.py 1            # baseline only
+python run_experiments.py 1 4 plots    # baseline + deployment + figures
+python run_experiments.py plots        # just regenerate figures
+python run_experiments.py 1 2 3        # suites 1-3
 ```
 
-This runs all 8 suites automatically:
+Available suites:
 
 | Suite                  | What It Does                                                        | Output                            |
 | ---------------------- | ------------------------------------------------------------------- | --------------------------------- |

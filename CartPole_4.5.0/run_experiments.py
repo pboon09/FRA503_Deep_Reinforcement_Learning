@@ -15,6 +15,7 @@ Executes 8 experimental suites, collects logs + Q-tables, and generates plots:
     python run_experiments.py
 """
 
+import argparse
 import glob
 import json
 import os
@@ -195,339 +196,378 @@ def collect_qtable_named(algo: str, dest_dir: str, dest_name: str):
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
+SUITE_NAMES = {
+    "1": "Baseline",
+    "2": "Action Resolution",
+    "3": "State Resolution",
+    "4": "Deployment",
+    "5": "LR Sweep",
+    "6": "Epsilon Schedule",
+    "7": "Gamma Sweep",
+    "8": "Q0 Init Sweep",
+    "plots": "Report Figures",
+}
+
+
+def parse_args():
+    p = argparse.ArgumentParser(
+        description="HW2 experiment runner. Select suites to run.",
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    p.add_argument(
+        "suites", nargs="*", default=["ALL"],
+        help=(
+            "Which suites to run. Options:\n"
+            "  ALL          - run everything (default)\n"
+            "  1            - Baseline\n"
+            "  2            - Action Resolution sweep\n"
+            "  3            - State Resolution sweep\n"
+            "  4            - Deployment evaluation\n"
+            "  5            - Learning Rate sweep\n"
+            "  6            - Epsilon Schedule sweep\n"
+            "  7            - Gamma sweep\n"
+            "  8            - Q0 Init sweep\n"
+            "  plots        - Generate report figures only\n"
+            "\n"
+            "Examples:\n"
+            "  python run_experiments.py              # run all\n"
+            "  python run_experiments.py 1 4 plots    # baseline + deploy + plots\n"
+            "  python run_experiments.py 1 2 3        # suites 1-3\n"
+            "  python run_experiments.py plots        # just regenerate figures\n"
+        ),
+    )
+    return p.parse_args()
+
+
 def main():
+    args = parse_args()
+
+    # Resolve which suites to run
+    if "ALL" in [s.upper() for s in args.suites]:
+        run_suites = set(SUITE_NAMES.keys())
+    else:
+        run_suites = set(args.suites)
+        invalid = run_suites - set(SUITE_NAMES.keys())
+        if invalid:
+            print(f"ERROR: Unknown suite(s): {invalid}")
+            print(f"Valid options: ALL, {', '.join(SUITE_NAMES.keys())}")
+            sys.exit(1)
+
+    selected = [f"  {k}: {SUITE_NAMES[k]}" for k in sorted(SUITE_NAMES) if k in run_suites]
+
     print("=" * 60)
     print("  HW2 Full Experiment Suite Runner")
     print(f"  Task:      {TASK}")
     print(f"  Num envs:  {NUM_ENVS}")
     print(f"  Algos:     {ALL_ALGOS}")
+    print(f"  Suites:")
+    for s in selected:
+        print(s)
     print("=" * 60)
 
     # ── Suite 1: Baseline (all 4 algos, default config) ──────────────────
-    print(f"\n{'#'*60}")
-    print("  SUITE 1: Baseline")
-    print(f"{'#'*60}")
-
     suite1_dir = os.path.join(ROOT, "experiments", "suite_1_baseline")
-    suite1_csvs = []
-    suite1_qtables = []
 
-    for algo in ALL_ALGOS:
-        ok = train(algo)
-        if not ok:
-            print(f"  ERROR: {algo} training failed, skipping.")
-            continue
-        csv_path = collect_csv_named(algo, suite1_dir, f"{algo}.csv")
-        qt_path = collect_qtable_named(algo, suite1_dir, f"{algo}.json")
-        if csv_path:
-            suite1_csvs.append(csv_path)
-        if qt_path:
-            suite1_qtables.append(qt_path)
+    if "1" in run_suites:
+        print(f"\n{'#'*60}")
+        print("  SUITE 1: Baseline")
+        print(f"{'#'*60}")
+
+        suite1_csvs = []
+        suite1_qtables = []
+
+        for algo in ALL_ALGOS:
+            ok = train(algo)
+            if not ok:
+                print(f"  ERROR: {algo} training failed, skipping.")
+                continue
+            csv_path = collect_csv_named(algo, suite1_dir, f"{algo}.csv")
+            qt_path = collect_qtable_named(algo, suite1_dir, f"{algo}.json")
+            if csv_path:
+                suite1_csvs.append(csv_path)
+            if qt_path:
+                suite1_qtables.append(qt_path)
 
     # ── Suite 2: Action Resolution (all algos, num_of_action sweep) ──────
-    print(f"\n{'#'*60}")
-    print("  SUITE 2: Action Resolution")
-    print(f"{'#'*60}")
-
     suite2_dir = os.path.join(ROOT, "experiments", "suite_2_action")
-    suite2_csvs = []
-    suite2_qtables = []
 
-    # Copy ALL baseline algorithms as the act_5 reference
-    for algo in ALL_ALGOS:
-        baseline_csv = os.path.join(suite1_dir, f"{algo}.csv")
-        baseline_qt = os.path.join(suite1_dir, f"{algo}.json")
-        if os.path.isfile(baseline_csv):
-            os.makedirs(suite2_dir, exist_ok=True)
-            dest = os.path.join(suite2_dir, f"{algo}_act_5.csv")
-            shutil.copy2(baseline_csv, dest)
-            suite2_csvs.append(dest)
-            print(f"  Copied baseline -> {dest}")
-        if os.path.isfile(baseline_qt):
-            os.makedirs(suite2_dir, exist_ok=True)
-            dest = os.path.join(suite2_dir, f"{algo}_act_5.json")
-            shutil.copy2(baseline_qt, dest)
-            suite2_qtables.append(dest)
-            print(f"  Copied baseline -> {dest}")
+    if "2" in run_suites:
+        print(f"\n{'#'*60}")
+        print("  SUITE 2: Action Resolution")
+        print(f"{'#'*60}")
 
-    # Train ALL algorithms for each action resolution
-    for n_act in [3, 11, 21]:
-        original = mutate_config({"num_of_action": n_act})
-        try:
-            for algo in ALL_ALGOS:
-                ok = train(algo)
-                if not ok:
-                    print(f"  ERROR: {algo} (act={n_act}) training failed.")
-                    continue
-                csv_path = collect_csv_named(algo, suite2_dir,
-                                             f"{algo}_act_{n_act}.csv")
-                qt_path = collect_qtable_named(algo, suite2_dir,
-                                               f"{algo}_act_{n_act}.json")
-                if csv_path:
-                    suite2_csvs.append(csv_path)
-                if qt_path:
-                    suite2_qtables.append(qt_path)
-        finally:
-            restore_config(original)
+        # Copy ALL baseline algorithms as the act_5 reference
+        for algo in ALL_ALGOS:
+            baseline_csv = os.path.join(suite1_dir, f"{algo}.csv")
+            baseline_qt = os.path.join(suite1_dir, f"{algo}.json")
+            if os.path.isfile(baseline_csv):
+                os.makedirs(suite2_dir, exist_ok=True)
+                dest = os.path.join(suite2_dir, f"{algo}_act_5.csv")
+                shutil.copy2(baseline_csv, dest)
+                print(f"  Copied baseline -> {dest}")
+            if os.path.isfile(baseline_qt):
+                os.makedirs(suite2_dir, exist_ok=True)
+                dest = os.path.join(suite2_dir, f"{algo}_act_5.json")
+                shutil.copy2(baseline_qt, dest)
+                print(f"  Copied baseline -> {dest}")
+
+        for n_act in [3, 11, 21]:
+            original = mutate_config({"num_of_action": n_act})
+            try:
+                for algo in ALL_ALGOS:
+                    ok = train(algo)
+                    if not ok:
+                        print(f"  ERROR: {algo} (act={n_act}) training failed.")
+                        continue
+                    collect_csv_named(algo, suite2_dir, f"{algo}_act_{n_act}.csv")
+                    collect_qtable_named(algo, suite2_dir, f"{algo}_act_{n_act}.json")
+            finally:
+                restore_config(original)
 
     # ── Suite 3: State Resolution (all algos, discretize_state_weight sweep)
-    print(f"\n{'#'*60}")
-    print("  SUITE 3: State Resolution")
-    print(f"{'#'*60}")
-
     suite3_dir = os.path.join(ROOT, "experiments", "suite_3_state")
-    suite3_csvs = []
-    suite3_qtables = []
 
-    # Copy ALL baseline algorithms as the mid reference
-    for algo in ALL_ALGOS:
-        baseline_csv = os.path.join(suite1_dir, f"{algo}.csv")
-        baseline_qt = os.path.join(suite1_dir, f"{algo}.json")
-        if os.path.isfile(baseline_csv):
-            os.makedirs(suite3_dir, exist_ok=True)
-            dest = os.path.join(suite3_dir, f"{algo}_mid_1_8_1_8.csv")
-            shutil.copy2(baseline_csv, dest)
-            suite3_csvs.append(dest)
-            print(f"  Copied baseline -> {dest}")
-        if os.path.isfile(baseline_qt):
-            os.makedirs(suite3_dir, exist_ok=True)
-            dest = os.path.join(suite3_dir, f"{algo}_mid_1_8_1_8.json")
-            shutil.copy2(baseline_qt, dest)
-            suite3_qtables.append(dest)
-            print(f"  Copied baseline -> {dest}")
+    if "3" in run_suites:
+        print(f"\n{'#'*60}")
+        print("  SUITE 3: State Resolution")
+        print(f"{'#'*60}")
 
-    state_weight_configs = [
-        {"weights": [1, 4, 1, 4], "label": "low_1_4_1_4"},
-        {"weights": [2, 16, 2, 16], "label": "high_2_16_2_16"},
-    ]
+        # Copy ALL baseline algorithms as the mid reference
+        for algo in ALL_ALGOS:
+            baseline_csv = os.path.join(suite1_dir, f"{algo}.csv")
+            baseline_qt = os.path.join(suite1_dir, f"{algo}.json")
+            if os.path.isfile(baseline_csv):
+                os.makedirs(suite3_dir, exist_ok=True)
+                dest = os.path.join(suite3_dir, f"{algo}_mid_1_8_1_8.csv")
+                shutil.copy2(baseline_csv, dest)
+                print(f"  Copied baseline -> {dest}")
+            if os.path.isfile(baseline_qt):
+                os.makedirs(suite3_dir, exist_ok=True)
+                dest = os.path.join(suite3_dir, f"{algo}_mid_1_8_1_8.json")
+                shutil.copy2(baseline_qt, dest)
+                print(f"  Copied baseline -> {dest}")
 
-    # Train ALL algorithms for each state weight config
-    for cfg in state_weight_configs:
-        original = mutate_config({"discretize_state_weight": cfg["weights"]})
-        try:
-            for algo in ALL_ALGOS:
-                ok = train(algo)
-                if not ok:
-                    print(f"  ERROR: {algo} (state={cfg['label']}) training failed.")
-                    continue
-                csv_path = collect_csv_named(algo, suite3_dir,
-                                             f"{algo}_{cfg['label']}.csv")
-                qt_path = collect_qtable_named(algo, suite3_dir,
-                                               f"{algo}_{cfg['label']}.json")
-                if csv_path:
-                    suite3_csvs.append(csv_path)
-                if qt_path:
-                    suite3_qtables.append(qt_path)
-        finally:
-            restore_config(original)
+        state_weight_configs = [
+            {"weights": [1, 4, 1, 4], "label": "low_1_4_1_4"},
+            {"weights": [2, 16, 2, 16], "label": "high_2_16_2_16"},
+        ]
+
+        for cfg in state_weight_configs:
+            original = mutate_config({"discretize_state_weight": cfg["weights"]})
+            try:
+                for algo in ALL_ALGOS:
+                    ok = train(algo)
+                    if not ok:
+                        print(f"  ERROR: {algo} (state={cfg['label']}) training failed.")
+                        continue
+                    collect_csv_named(algo, suite3_dir, f"{algo}_{cfg['label']}.csv")
+                    collect_qtable_named(algo, suite3_dir, f"{algo}_{cfg['label']}.json")
+            finally:
+                restore_config(original)
 
     # ── Suite 4: Deployment Evaluation (play.py with Suite 1 Q-tables) ───
-    print(f"\n{'#'*60}")
-    print("  SUITE 4: Deployment Evaluation")
-    print(f"{'#'*60}")
-
     suite4_dir = os.path.join(ROOT, "experiments", "suite_4_deployment")
-    suite4_video_dir = os.path.join(suite4_dir, "videos")
-    suite4_traj_dir = os.path.join(suite4_dir, "trajectories")
-    os.makedirs(suite4_dir, exist_ok=True)
-    eval_csv = os.path.join(suite4_dir, "evaluation_results.csv")
 
-    # Remove stale CSV so headers are fresh
-    if os.path.isfile(eval_csv):
-        os.remove(eval_csv)
+    if "4" in run_suites:
+        print(f"\n{'#'*60}")
+        print("  SUITE 4: Deployment Evaluation")
+        print(f"{'#'*60}")
 
-    for algo in ALL_ALGOS:
-        qtable_path = os.path.join(suite1_dir, f"{algo}.json")
-        if not os.path.isfile(qtable_path):
-            print(f"  WARNING: No Q-table for {algo}, skipping evaluation.")
-            continue
-        algo_video_dir = os.path.join(suite4_video_dir, algo)
-        evaluate(algo, qtable_path, num_episodes=10, output_csv=eval_csv,
-                 video=True, video_dir=algo_video_dir,
-                 trajectory_dir=suite4_traj_dir)
+        suite4_video_dir = os.path.join(suite4_dir, "videos")
+        suite4_traj_dir = os.path.join(suite4_dir, "trajectories")
+        os.makedirs(suite4_dir, exist_ok=True)
+        eval_csv = os.path.join(suite4_dir, "evaluation_results.csv")
+
+        if os.path.isfile(eval_csv):
+            os.remove(eval_csv)
+
+        for algo in ALL_ALGOS:
+            qtable_path = os.path.join(suite1_dir, f"{algo}.json")
+            if not os.path.isfile(qtable_path):
+                print(f"  WARNING: No Q-table for {algo}, skipping evaluation.")
+                continue
+            algo_video_dir = os.path.join(suite4_video_dir, algo)
+            evaluate(algo, qtable_path, num_episodes=10, output_csv=eval_csv,
+                     video=True, video_dir=algo_video_dir,
+                     trajectory_dir=suite4_traj_dir)
 
     # ── Suite 5: Learning Rate Sweep ─────────────────────────────────────
-    print(f"\n{'#'*60}")
-    print("  SUITE 5: Learning Rate Sweep")
-    print(f"{'#'*60}")
-
     suite5_dir = os.path.join(ROOT, "experiments", "suite_5_lr")
 
-    # Copy baseline as lr_0.1 reference
-    for algo in ALL_ALGOS:
-        baseline_csv = os.path.join(suite1_dir, f"{algo}.csv")
-        baseline_qt = os.path.join(suite1_dir, f"{algo}.json")
-        if os.path.isfile(baseline_csv):
-            os.makedirs(suite5_dir, exist_ok=True)
-            dest = os.path.join(suite5_dir, f"{algo}_lr_0.1.csv")
-            shutil.copy2(baseline_csv, dest)
-            print(f"  Copied baseline -> {dest}")
-        if os.path.isfile(baseline_qt):
-            os.makedirs(suite5_dir, exist_ok=True)
-            dest = os.path.join(suite5_dir, f"{algo}_lr_0.1.json")
-            shutil.copy2(baseline_qt, dest)
-            print(f"  Copied baseline -> {dest}")
+    if "5" in run_suites:
+        print(f"\n{'#'*60}")
+        print("  SUITE 5: Learning Rate Sweep")
+        print(f"{'#'*60}")
 
-    for lr_val in [0.01, 0.05, 0.3, 0.5, 0.9]:
-        original = mutate_config_full(algo_lr=lr_val)
-        try:
-            for algo in ALL_ALGOS:
-                ok = train(algo)
-                if not ok:
-                    print(f"  ERROR: {algo} (lr={lr_val}) training failed.")
-                    continue
-                collect_csv_named(algo, suite5_dir, f"{algo}_lr_{lr_val}.csv")
-                collect_qtable_named(algo, suite5_dir, f"{algo}_lr_{lr_val}.json")
-        finally:
-            restore_config(original)
+        # Copy baseline as lr_0.1 reference
+        for algo in ALL_ALGOS:
+            baseline_csv = os.path.join(suite1_dir, f"{algo}.csv")
+            baseline_qt = os.path.join(suite1_dir, f"{algo}.json")
+            if os.path.isfile(baseline_csv):
+                os.makedirs(suite5_dir, exist_ok=True)
+                dest = os.path.join(suite5_dir, f"{algo}_lr_0.1.csv")
+                shutil.copy2(baseline_csv, dest)
+                print(f"  Copied baseline -> {dest}")
+            if os.path.isfile(baseline_qt):
+                os.makedirs(suite5_dir, exist_ok=True)
+                dest = os.path.join(suite5_dir, f"{algo}_lr_0.1.json")
+                shutil.copy2(baseline_qt, dest)
+                print(f"  Copied baseline -> {dest}")
+
+        for lr_val in [0.01, 0.05, 0.3, 0.5, 0.9]:
+            original = mutate_config_full(algo_lr=lr_val)
+            try:
+                for algo in ALL_ALGOS:
+                    ok = train(algo)
+                    if not ok:
+                        print(f"  ERROR: {algo} (lr={lr_val}) training failed.")
+                        continue
+                    collect_csv_named(algo, suite5_dir, f"{algo}_lr_{lr_val}.csv")
+                    collect_qtable_named(algo, suite5_dir, f"{algo}_lr_{lr_val}.json")
+            finally:
+                restore_config(original)
 
     # ── Suite 6: Epsilon Schedule Sweep ───────────────────────────────────
-    print(f"\n{'#'*60}")
-    print("  SUITE 6: Epsilon Schedule Sweep")
-    print(f"{'#'*60}")
-
     suite6_dir = os.path.join(ROOT, "experiments", "suite_6_epsilon")
 
-    # Copy baseline as eps_per_step_0.9995 reference
-    for algo in ALL_ALGOS:
-        baseline_csv = os.path.join(suite1_dir, f"{algo}.csv")
-        baseline_qt = os.path.join(suite1_dir, f"{algo}.json")
-        if os.path.isfile(baseline_csv):
-            os.makedirs(suite6_dir, exist_ok=True)
-            dest = os.path.join(suite6_dir, f"{algo}_per_step_0.9995.csv")
-            shutil.copy2(baseline_csv, dest)
-            print(f"  Copied baseline -> {dest}")
-        if os.path.isfile(baseline_qt):
-            os.makedirs(suite6_dir, exist_ok=True)
-            dest = os.path.join(suite6_dir, f"{algo}_per_step_0.9995.json")
-            shutil.copy2(baseline_qt, dest)
-            print(f"  Copied baseline -> {dest}")
+    if "6" in run_suites:
+        print(f"\n{'#'*60}")
+        print("  SUITE 6: Epsilon Schedule Sweep")
+        print(f"{'#'*60}")
 
-    eps_configs = [
-        {"mode": "per_step",    "decay": 0.9995, "start": 1.0, "label": "per_step_0.9995"},
-        {"mode": "per_step",    "decay": 0.999,  "start": 1.0, "label": "per_step_0.999"},
-        {"mode": "per_step",    "decay": 0.9999, "start": 1.0, "label": "per_step_0.9999"},
-        {"mode": "per_episode", "decay": 0.995,  "start": 1.0, "label": "per_episode_0.995"},
-        {"mode": "per_episode", "decay": 0.99,   "start": 1.0, "label": "per_episode_0.99"},
-        {"mode": "fixed",       "decay": 1.0,    "start": 0.1, "label": "fixed_0.1"},
-    ]
+        # Copy baseline as eps_per_step_0.9995 reference
+        for algo in ALL_ALGOS:
+            baseline_csv = os.path.join(suite1_dir, f"{algo}.csv")
+            baseline_qt = os.path.join(suite1_dir, f"{algo}.json")
+            if os.path.isfile(baseline_csv):
+                os.makedirs(suite6_dir, exist_ok=True)
+                dest = os.path.join(suite6_dir, f"{algo}_per_step_0.9995.csv")
+                shutil.copy2(baseline_csv, dest)
+                print(f"  Copied baseline -> {dest}")
+            if os.path.isfile(baseline_qt):
+                os.makedirs(suite6_dir, exist_ok=True)
+                dest = os.path.join(suite6_dir, f"{algo}_per_step_0.9995.json")
+                shutil.copy2(baseline_qt, dest)
+                print(f"  Copied baseline -> {dest}")
 
-    for ecfg in eps_configs:
-        original = mutate_config_full(shared_updates={
-            "epsilon_decay_mode": ecfg["mode"],
-            "epsilon_decay": ecfg["decay"],
-            "start_epsilon": ecfg["start"],
-        })
-        try:
-            for algo in ALL_ALGOS:
-                ok = train(algo)
-                if not ok:
-                    print(f"  ERROR: {algo} (eps={ecfg['label']}) training failed.")
-                    continue
-                collect_csv_named(algo, suite6_dir,
-                                  f"{algo}_{ecfg['label']}.csv")
-                collect_qtable_named(algo, suite6_dir,
-                                     f"{algo}_{ecfg['label']}.json")
-        finally:
-            restore_config(original)
+        eps_configs = [
+            {"mode": "per_step",    "decay": 0.9995, "start": 1.0, "label": "per_step_0.9995"},
+            {"mode": "per_step",    "decay": 0.999,  "start": 1.0, "label": "per_step_0.999"},
+            {"mode": "per_step",    "decay": 0.9999, "start": 1.0, "label": "per_step_0.9999"},
+            {"mode": "per_episode", "decay": 0.995,  "start": 1.0, "label": "per_episode_0.995"},
+            {"mode": "per_episode", "decay": 0.99,   "start": 1.0, "label": "per_episode_0.99"},
+            {"mode": "per_episode", "decay": 0.9995, "start": 1.0, "label": "per_episode_0.9995"},
+            {"mode": "fixed",       "decay": 1.0,    "start": 0.1, "label": "fixed_0.1"},
+        ]
+
+        for ecfg in eps_configs:
+            original = mutate_config_full(shared_updates={
+                "epsilon_decay_mode": ecfg["mode"],
+                "epsilon_decay": ecfg["decay"],
+                "start_epsilon": ecfg["start"],
+            })
+            try:
+                for algo in ALL_ALGOS:
+                    ok = train(algo)
+                    if not ok:
+                        print(f"  ERROR: {algo} (eps={ecfg['label']}) training failed.")
+                        continue
+                    collect_csv_named(algo, suite6_dir, f"{algo}_{ecfg['label']}.csv")
+                    collect_qtable_named(algo, suite6_dir, f"{algo}_{ecfg['label']}.json")
+            finally:
+                restore_config(original)
 
     # ── Suite 7: Discount Factor Sweep ────────────────────────────────────
-    print(f"\n{'#'*60}")
-    print("  SUITE 7: Discount Factor Sweep")
-    print(f"{'#'*60}")
-
     suite7_dir = os.path.join(ROOT, "experiments", "suite_7_gamma")
 
-    # Copy baseline as gamma_0.99 reference
-    for algo in ALL_ALGOS:
-        baseline_csv = os.path.join(suite1_dir, f"{algo}.csv")
-        baseline_qt = os.path.join(suite1_dir, f"{algo}.json")
-        if os.path.isfile(baseline_csv):
-            os.makedirs(suite7_dir, exist_ok=True)
-            dest = os.path.join(suite7_dir, f"{algo}_gamma_0.99.csv")
-            shutil.copy2(baseline_csv, dest)
-            print(f"  Copied baseline -> {dest}")
-        if os.path.isfile(baseline_qt):
-            os.makedirs(suite7_dir, exist_ok=True)
-            dest = os.path.join(suite7_dir, f"{algo}_gamma_0.99.json")
-            shutil.copy2(baseline_qt, dest)
-            print(f"  Copied baseline -> {dest}")
+    if "7" in run_suites:
+        print(f"\n{'#'*60}")
+        print("  SUITE 7: Discount Factor Sweep")
+        print(f"{'#'*60}")
 
-    for gamma_val in [0.9, 0.95, 0.999, 1.0]:
-        original = mutate_config_full(shared_updates={"discount": gamma_val})
-        try:
-            for algo in ALL_ALGOS:
-                ok = train(algo)
-                if not ok:
-                    print(f"  ERROR: {algo} (gamma={gamma_val}) training failed.")
-                    continue
-                collect_csv_named(algo, suite7_dir,
-                                  f"{algo}_gamma_{gamma_val}.csv")
-                collect_qtable_named(algo, suite7_dir,
-                                     f"{algo}_gamma_{gamma_val}.json")
-        finally:
-            restore_config(original)
+        # Copy baseline as gamma_0.99 reference
+        for algo in ALL_ALGOS:
+            baseline_csv = os.path.join(suite1_dir, f"{algo}.csv")
+            baseline_qt = os.path.join(suite1_dir, f"{algo}.json")
+            if os.path.isfile(baseline_csv):
+                os.makedirs(suite7_dir, exist_ok=True)
+                dest = os.path.join(suite7_dir, f"{algo}_gamma_0.99.csv")
+                shutil.copy2(baseline_csv, dest)
+                print(f"  Copied baseline -> {dest}")
+            if os.path.isfile(baseline_qt):
+                os.makedirs(suite7_dir, exist_ok=True)
+                dest = os.path.join(suite7_dir, f"{algo}_gamma_0.99.json")
+                shutil.copy2(baseline_qt, dest)
+                print(f"  Copied baseline -> {dest}")
+
+        for gamma_val in [0.9, 0.95, 0.999, 1.0]:
+            original = mutate_config_full(shared_updates={"discount": gamma_val})
+            try:
+                for algo in ALL_ALGOS:
+                    ok = train(algo)
+                    if not ok:
+                        print(f"  ERROR: {algo} (gamma={gamma_val}) training failed.")
+                        continue
+                    collect_csv_named(algo, suite7_dir, f"{algo}_gamma_{gamma_val}.csv")
+                    collect_qtable_named(algo, suite7_dir, f"{algo}_gamma_{gamma_val}.json")
+            finally:
+                restore_config(original)
 
     # ── Suite 8: Q₀ Initialization Sweep ──────────────────────────────────
-    print(f"\n{'#'*60}")
-    print("  SUITE 8: Q0 Initialization Sweep")
-    print(f"{'#'*60}")
-
     suite8_dir = os.path.join(ROOT, "experiments", "suite_8_q_init")
 
-    # Copy baseline as q_init_0.0 reference
-    for algo in ALL_ALGOS:
-        baseline_csv = os.path.join(suite1_dir, f"{algo}.csv")
-        baseline_qt = os.path.join(suite1_dir, f"{algo}.json")
-        if os.path.isfile(baseline_csv):
-            os.makedirs(suite8_dir, exist_ok=True)
-            dest = os.path.join(suite8_dir, f"{algo}_q_init_0.0.csv")
-            shutil.copy2(baseline_csv, dest)
-            print(f"  Copied baseline -> {dest}")
-        if os.path.isfile(baseline_qt):
-            os.makedirs(suite8_dir, exist_ok=True)
-            dest = os.path.join(suite8_dir, f"{algo}_q_init_0.0.json")
-            shutil.copy2(baseline_qt, dest)
-            print(f"  Copied baseline -> {dest}")
+    if "8" in run_suites:
+        print(f"\n{'#'*60}")
+        print("  SUITE 8: Q0 Initialization Sweep")
+        print(f"{'#'*60}")
 
-    for q0_val in [10.0, 50.0, 100.0]:
-        original = mutate_config_full(shared_updates={"q_init": q0_val})
-        try:
-            for algo in ALL_ALGOS:
-                ok = train(algo)
-                if not ok:
-                    print(f"  ERROR: {algo} (q_init={q0_val}) training failed.")
-                    continue
-                collect_csv_named(algo, suite8_dir,
-                                  f"{algo}_q_init_{q0_val}.csv")
-                collect_qtable_named(algo, suite8_dir,
-                                     f"{algo}_q_init_{q0_val}.json")
-        finally:
-            restore_config(original)
+        # Copy baseline as q_init_0.0 reference
+        for algo in ALL_ALGOS:
+            baseline_csv = os.path.join(suite1_dir, f"{algo}.csv")
+            baseline_qt = os.path.join(suite1_dir, f"{algo}.json")
+            if os.path.isfile(baseline_csv):
+                os.makedirs(suite8_dir, exist_ok=True)
+                dest = os.path.join(suite8_dir, f"{algo}_q_init_0.0.csv")
+                shutil.copy2(baseline_csv, dest)
+                print(f"  Copied baseline -> {dest}")
+            if os.path.isfile(baseline_qt):
+                os.makedirs(suite8_dir, exist_ok=True)
+                dest = os.path.join(suite8_dir, f"{algo}_q_init_0.0.json")
+                shutil.copy2(baseline_qt, dest)
+                print(f"  Copied baseline -> {dest}")
+
+        for q0_val in [10.0, 50.0, 100.0]:
+            original = mutate_config_full(shared_updates={"q_init": q0_val})
+            try:
+                for algo in ALL_ALGOS:
+                    ok = train(algo)
+                    if not ok:
+                        print(f"  ERROR: {algo} (q_init={q0_val}) training failed.")
+                        continue
+                    collect_csv_named(algo, suite8_dir, f"{algo}_q_init_{q0_val}.csv")
+                    collect_qtable_named(algo, suite8_dir, f"{algo}_q_init_{q0_val}.json")
+            finally:
+                restore_config(original)
 
     # ── Report Figures ────────────────────────────────────────────────────
-    print(f"\n{'#'*60}")
-    print("  REPORT FIGURES")
-    print(f"{'#'*60}")
-
     figures_dir = os.path.join(ROOT, "figures")
-    os.makedirs(figures_dir, exist_ok=True)
-    report_cmd = [sys.executable, PLOT_REPORT, "--output", figures_dir]
-    print(f"  PLOT REPORT -> {figures_dir}/")
-    subprocess.run(report_cmd, cwd=ROOT)
+
+    if "plots" in run_suites:
+        print(f"\n{'#'*60}")
+        print("  REPORT FIGURES")
+        print(f"{'#'*60}")
+
+        os.makedirs(figures_dir, exist_ok=True)
+        report_cmd = [sys.executable, PLOT_REPORT, "--output", figures_dir]
+        print(f"  PLOT REPORT -> {figures_dir}/")
+        subprocess.run(report_cmd, cwd=ROOT)
 
     # ── Summary ──────────────────────────────────────────────────────────
     print("\n" + "=" * 60)
-    print("  ALL EXPERIMENT SUITES COMPLETE")
-    print(f"  Suite 1 (Baseline):    {suite1_dir}/")
-    print(f"  Suite 2 (Action Res):  {suite2_dir}/")
-    print(f"  Suite 3 (State Res):   {suite3_dir}/")
-    print(f"  Suite 4 (Deployment):  {suite4_dir}/")
-    print(f"  Suite 5 (LR Sweep):    {suite5_dir}/")
-    print(f"  Suite 6 (Epsilon Sch): {suite6_dir}/")
-    print(f"  Suite 7 (Gamma):       {suite7_dir}/")
-    print(f"  Suite 8 (Q0 Init):     {suite8_dir}/")
-    print(f"  Figures:               {figures_dir}/")
+    print("  COMPLETED SUITES:")
+    for k in sorted(SUITE_NAMES):
+        if k in run_suites:
+            print(f"    {k}: {SUITE_NAMES[k]}")
     print("=" * 60)
 
 

@@ -192,9 +192,12 @@ def make_fig2(output_dir: str):
         # Left: Running max Q-value (cumulative max per episode)
         q_cols = get_q_cols(df)
         if q_cols:
-            max_q_per_step = df[q_cols].max(axis=1)
-            ep_max_q = max_q_per_step.groupby(df["episode"]).max()
-            running_max = ep_max_q.cummax()
+            if "global_max_q" in df.columns:
+                running_max = df["global_max_q"].cummax()
+            else:
+                max_q_per_step = df[q_cols].max(axis=1)
+                ep_max_q = max_q_per_step.groupby(df["episode"]).max()
+                running_max = ep_max_q.cummax()
             ep_pct = np.linspace(0, 100, len(running_max))
             ax1.plot(ep_pct, running_max.values, label=label,
                      linewidth=1.8, color=color)
@@ -517,10 +520,23 @@ def make_fig7(output_dir: str):
             continue
 
         v_filled = np.nan_to_num(v_grid, nan=0.0)
-        X, Y = np.meshgrid(xs, ys)
+
+        # Interpolate to a finer grid for smooth surface
+        from scipy.ndimage import gaussian_filter
+        from scipy.interpolate import RegularGridInterpolator
+        fine_xs = np.linspace(xs.min(), xs.max(), 80)
+        fine_ys = np.linspace(ys.min(), ys.max(), 80)
+        interp = RegularGridInterpolator((ys, xs), v_filled,
+                                         method="linear",
+                                         bounds_error=False,
+                                         fill_value=0.0)
+        fine_Y, fine_X = np.meshgrid(fine_ys, fine_xs, indexing="ij")
+        pts = np.stack([fine_Y.ravel(), fine_X.ravel()], axis=-1)
+        v_fine = interp(pts).reshape(fine_Y.shape)
+        v_fine = gaussian_filter(v_fine, sigma=1.5)
 
         ax = fig.add_subplot(2, 2, idx + 1, projection="3d")
-        surf = ax.plot_surface(X, Y, v_filled, cmap="viridis",
+        surf = ax.plot_surface(fine_X, fine_Y, v_fine, cmap="viridis",
                                edgecolor="none", alpha=0.9)
         fig.colorbar(surf, ax=ax, label="V(s)", shrink=0.55, pad=0.1)
 
@@ -561,11 +577,24 @@ def make_fig8(output_dir: str):
             continue
 
         force_filled = np.nan_to_num(force_grid, nan=0.0)
-        X, Y = np.meshgrid(xs, ys)
+
+        # Interpolate to a finer grid for smooth surface
+        from scipy.ndimage import gaussian_filter
+        from scipy.interpolate import RegularGridInterpolator
+        fine_xs = np.linspace(xs.min(), xs.max(), 80)
+        fine_ys = np.linspace(ys.min(), ys.max(), 80)
+        interp = RegularGridInterpolator((ys, xs), force_filled,
+                                         method="linear",
+                                         bounds_error=False,
+                                         fill_value=0.0)
+        fine_Y, fine_X = np.meshgrid(fine_ys, fine_xs, indexing="ij")
+        pts = np.stack([fine_Y.ravel(), fine_X.ravel()], axis=-1)
+        force_fine = interp(pts).reshape(fine_Y.shape)
+        force_fine = gaussian_filter(force_fine, sigma=1.5)
 
         ax = fig.add_subplot(2, 2, idx + 1, projection="3d")
         cmap_obj = cm.get_cmap("RdYlGn")
-        surf = ax.plot_surface(X, Y, force_filled, cmap=cmap_obj,
+        surf = ax.plot_surface(fine_X, fine_Y, force_fine, cmap=cmap_obj,
                                vmin=a_range[0], vmax=a_range[1],
                                edgecolor="none", alpha=0.9)
         fig.colorbar(surf, ax=ax, label="Force (N)", shrink=0.55, pad=0.1)
