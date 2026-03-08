@@ -189,17 +189,16 @@ def make_fig2(output_dir: str):
         label = ALGO_DISPLAY[algo]
         pct = progress_pct(df)
 
-        # Left: Running max Q-value (cumulative max per episode)
+        # Left: Max Q-value in Q-table at each episode
         q_cols = get_q_cols(df)
         if q_cols:
             if "global_max_q" in df.columns:
-                running_max = df["global_max_q"].cummax()
+                max_q = df["global_max_q"]
             else:
                 max_q_per_step = df[q_cols].max(axis=1)
-                ep_max_q = max_q_per_step.groupby(df["episode"]).max()
-                running_max = ep_max_q.cummax()
-            ep_pct = np.linspace(0, 100, len(running_max))
-            ax1.plot(ep_pct, running_max.values, label=label,
+                max_q = max_q_per_step.groupby(df["episode"]).max()
+            ep_pct = np.linspace(0, 100, len(max_q))
+            ax1.plot(ep_pct, max_q.values, label=label,
                      linewidth=1.8, color=color)
 
         # Right: TD Error = |r + γ·maxQ(s') - Q(s,a)|
@@ -216,7 +215,7 @@ def make_fig2(output_dir: str):
                 ax2.plot(pct_td, rolling_mean(td_series, window),
                          label=label, linewidth=1.8, color=color)
 
-    ax1.set_title("(a) Running Max Q-value")
+    ax1.set_title("(a) Max Q-value")
     ax1.set_xlabel("Training Progress (%)")
     ax1.set_ylabel("Max Q-value")
     ax1.legend(fontsize=9)
