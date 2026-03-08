@@ -503,7 +503,7 @@ def make_fig6(output_dir: str):
 
 def make_fig7(output_dir: str):
     fig = plt.figure(figsize=(16, 12))
-    fig.suptitle("3D Q-Value Surface",
+    fig.suptitle("3D State-Value Surface",
                  fontsize=14, fontweight="bold")
 
     for idx, algo in enumerate(ALGOS):
