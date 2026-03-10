@@ -498,6 +498,85 @@ def make_fig6(output_dir: str):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Figure 6b: Deployment Bar Chart (mean±std reward + per-episode scatter)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def make_fig6b(output_dir: str):
+    traj_dir = os.path.join(ROOT, "experiments", "suite_4_deployment", "trajectories")
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5),
+                                    gridspec_kw={"width_ratios": [1, 1.3]})
+    fig.suptitle("Deployment Performance Comparison (10 Episodes, ε=0)",
+                 fontsize=14, fontweight="bold")
+
+    algo_labels = []
+    means_r, stds_r = [], []
+    means_l, stds_l = [], []
+    all_ep_lengths = {}
+
+    for algo in ALGOS:
+        csv_path = os.path.join(traj_dir, f"{algo}_trajectory.csv")
+        if not os.path.isfile(csv_path):
+            print(f"  WARNING: Missing {csv_path}")
+            continue
+        df = pd.read_csv(csv_path)
+        ep_rewards = df.groupby("episode")["reward"].sum()
+        ep_lengths = df.groupby("episode").size()
+
+        algo_labels.append(ALGO_DISPLAY[algo])
+        means_r.append(ep_rewards.mean())
+        stds_r.append(ep_rewards.std())
+        means_l.append(ep_lengths.mean())
+        stds_l.append(ep_lengths.std())
+        all_ep_lengths[algo] = ep_lengths.values
+
+    if not algo_labels:
+        plt.close(fig)
+        return
+
+    x = np.arange(len(algo_labels))
+    colors = [ALGO_COLORS[a] for a in ALGOS if ALGO_DISPLAY[a] in algo_labels]
+
+    # Left: Bar chart with error bars (episode reward)
+    bars = ax1.bar(x, means_r, yerr=stds_r, capsize=6, color=colors,
+                   edgecolor="black", linewidth=0.8, alpha=0.85, width=0.6)
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(algo_labels, fontsize=10)
+    ax1.set_ylabel("Episode Reward (mean ± std)", fontsize=11)
+    ax1.set_title("(a) Mean Episode Reward", fontsize=12, fontweight="bold")
+    ax1.grid(True, alpha=0.3, axis="y")
+    ax1.set_ylim(bottom=0)
+    # Annotate bar values
+    for bar, m, s in zip(bars, means_r, stds_r):
+        ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + s + 10,
+                 f"{m:.0f}", ha="center", va="bottom", fontsize=9, fontweight="bold")
+
+    # Right: Per-episode scatter + line showing consistency
+    for i, algo in enumerate(ALGOS):
+        if algo not in all_ep_lengths:
+            continue
+        lengths = all_ep_lengths[algo]
+        episodes = np.arange(len(lengths))
+        ax2.plot(episodes, lengths, marker="o", markersize=6, linewidth=1.5,
+                 color=ALGO_COLORS[algo], label=ALGO_DISPLAY[algo], alpha=0.85)
+    ax2.axhline(1000, color="gray", linestyle="--", linewidth=1, alpha=0.5,
+                label="Max (1000)")
+    ax2.set_xlabel("Episode Index", fontsize=11)
+    ax2.set_ylabel("Episode Length (steps)", fontsize=11)
+    ax2.set_title("(b) Per-Episode Consistency", fontsize=12, fontweight="bold")
+    ax2.legend(fontsize=9, loc="upper right")
+    ax2.grid(True, alpha=0.3)
+    ax2.set_ylim(bottom=0)
+    ax2.set_xticks(np.arange(10))
+
+    fig.tight_layout()
+    path = os.path.join(output_dir, "fig6b_deployment_bar.png")
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: {path}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Figure 7: 3D Q-Value Surface (2×2)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -816,7 +895,7 @@ def main():
     args = parse_args()
     os.makedirs(args.output, exist_ok=True)
 
-    print(f"Generating 12 report figures → {args.output}/\n")
+    print(f"Generating 13 report figures → {args.output}/\n")
 
     print("[1/12] Figure 1: Exploration Feedback Loop")
     make_fig1(args.output)
@@ -836,25 +915,28 @@ def main():
     print("[6/12] Figure 6: Deployment Phase Portraits")
     make_fig6(args.output)
 
-    print("[7/12] Figure 7: 3D Q-Value Surface")
+    print("[7/13] Figure 6b: Deployment Bar Chart")
+    make_fig6b(args.output)
+
+    print("[8/13] Figure 7: 3D Q-Value Surface")
     make_fig7(args.output)
 
-    print("[8/12] Figure 8: 3D Policy Surface")
+    print("[9/13] Figure 8: 3D Policy Surface")
     make_fig8(args.output)
 
-    print("[9/12] Figure 9: Learning Rate Sweep")
+    print("[10/13] Figure 9: Learning Rate Sweep")
     make_fig9(args.output)
 
-    print("[10/12] Figure 10: Epsilon Schedule Sweep")
+    print("[11/13] Figure 10: Epsilon Schedule Sweep")
     make_fig10(args.output)
 
-    print("[11/12] Figure 11: Discount Factor Sweep")
+    print("[12/13] Figure 11: Discount Factor Sweep")
     make_fig11(args.output)
 
-    print("[12/12] Figure 12: Q₀ Initialization Sweep")
+    print("[13/13] Figure 12: Q₀ Initialization Sweep")
     make_fig12(args.output)
 
-    print(f"\nDone. 12 figures saved to: {args.output}/")
+    print(f"\nDone. 13 figures saved to: {args.output}/")
 
 
 if __name__ == "__main__":
