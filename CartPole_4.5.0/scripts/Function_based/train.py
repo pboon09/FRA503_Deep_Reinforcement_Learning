@@ -213,7 +213,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             for episode in tqdm(range(n_episodes)):
 
                 if Algorithm_name == "Linear_Q":
-                    ep_return, ep_len = agent.learn(env, max_steps=1000)
+                    ep_return, ep_len = agent.learn(env, max_steps=1000, num_agents=num_envs)
                     loss_val = 0.0
                 elif Algorithm_name == "DQN":
                     ep_return, ep_len = agent.learn(env, num_agents=num_envs, max_steps=1000)

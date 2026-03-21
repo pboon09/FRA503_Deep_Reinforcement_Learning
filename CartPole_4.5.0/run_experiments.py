@@ -17,7 +17,7 @@ ALL_ALGOS = ["Linear_Q", "DQN", "MC_REINFORCE", "AC", "PPO"]
 def train(algorithm):
     env = os.environ.copy()
     env["RL_ALGORITHM"] = algorithm
-    num = 1 if algorithm in ("Linear_Q",) else NUM_ENVS
+    num = NUM_ENVS
     cmd = [sys.executable, TRAIN_SCRIPT, "--task", TASK, "--num_envs", str(num), "--headless"]
     print(f"\n{'='*60}\n  TRAIN: {algorithm} (num_envs={num})\n{'='*60}")
     return subprocess.run(cmd, env=env, cwd=ROOT).returncode == 0

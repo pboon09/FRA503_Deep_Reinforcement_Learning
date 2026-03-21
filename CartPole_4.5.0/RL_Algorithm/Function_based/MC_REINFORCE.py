@@ -139,10 +139,64 @@ class MC_REINFORCE(BaseAlgorithm):
 
     def learn(self, env, num_agents: int = 1):
         self.policy_net.train()
-        episode_return, stepwise_returns, log_prob_actions, trajectory = \
-            self.generate_trajectory(env)
-        loss = self.update_policy(stepwise_returns, log_prob_actions)
-        return episode_return, loss, trajectory
+
+        if num_agents <= 1:
+            episode_return, stepwise_returns, log_prob_actions, trajectory = \
+                self.generate_trajectory(env)
+            loss = self.update_policy(stepwise_returns, log_prob_actions)
+            return episode_return, loss, trajectory
+
+        T = 200
+        obs, _ = env.reset()
+        state = obs['policy'].to(self.device)
+
+        log_probs_buf = []
+        rewards_buf = []
+        dones_buf = []
+
+        for _ in range(T):
+            dist = self._get_distribution(state)
+            action, log_prob = self._sample_action(dist)
+
+            if self.action_type == "discrete":
+                action_vals = []
+                for i in range(num_agents):
+                    action_vals.append(
+                        self.action_range[0] + (self.action_range[1] - self.action_range[0])
+                        * action[i].item() / (self.num_of_action - 1)
+                    )
+                env_action = torch.tensor(action_vals, dtype=torch.float32).unsqueeze(-1).to(self.device)
+            else:
+                env_action = action
+
+            next_obs, reward, terminated, truncated, _ = env.step(env_action)
+            done = (terminated | truncated).float().to(self.device)
+
+            log_probs_buf.append(log_prob)
+            rewards_buf.append(reward.to(self.device))
+            dones_buf.append(done)
+
+            state = next_obs['policy'].to(self.device)
+
+        log_probs = torch.stack(log_probs_buf)
+        rewards = torch.stack(rewards_buf)
+        dones = torch.stack(dones_buf)
+
+        G = torch.zeros(num_agents, device=self.device)
+        returns = torch.zeros(T, num_agents, device=self.device)
+        for t in reversed(range(T)):
+            G = rewards[t] + self.discount_factor * G * (1.0 - dones[t])
+            returns[t] = G
+
+        returns = (returns - returns.mean()) / (returns.std() + 1e-8)
+
+        loss = -(returns * log_probs).mean()
+        self.optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=1.0)
+        self.optimizer.step()
+
+        return rewards.sum(0).mean().item(), loss.item(), None
 
     def save_model(self, path: str, filename: str) -> None:
         os.makedirs(path, exist_ok=True)
