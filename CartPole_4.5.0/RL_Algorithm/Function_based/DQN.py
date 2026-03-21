@@ -178,7 +178,8 @@ class DQN(OffPolicyAlgorithm):
                     total_episodes += 1
 
             if global_step >= self.learning_starts:
-                self.update_policy()
+                for _ in range(4):  # multiple gradient steps per env step
+                    self.update_policy()
                 self.update_target_networks()
             self.decay_epsilon()
             state = next_state

@@ -41,11 +41,13 @@ class MC_REINFORCE(BaseAlgorithm):
             learning_rate: float = None,
             discount_factor: float = None,
             entropy_coef: float = 0.01,
+            num_epochs: int = 5,
     ) -> None:
         assert action_type in ("discrete", "continuous")
         self.action_type = action_type
         self.LR = learning_rate
         self.entropy_coef = entropy_coef
+        self.num_epochs = num_epochs
         self.policy_net = MC_REINFORCE_network(
             n_observations, hidden_dim, num_of_action, dropout, action_type
         ).to(device)
@@ -93,27 +95,28 @@ class MC_REINFORCE(BaseAlgorithm):
         ep_steps = torch.zeros(num_agents, dtype=torch.int, device=self.device)
 
         while total_episodes < n_episodes:
-            log_probs_buf = []
+            obs_buf = []
+            actions_buf = []
             rewards_buf = []
             dones_buf = []
-            entropies_buf = []
 
-            for _ in range(T):
-                dist = self._get_distribution(state)
-                action, log_prob = self._sample_action(dist)
-                entropies_buf.append(dist.entropy().mean())
+            with torch.no_grad():
+                for _ in range(T):
+                    obs_buf.append(state.clone())
+                    dist = self._get_distribution(state)
+                    action, log_prob = self._sample_action(dist)
+                    actions_buf.append(action)
 
-                if self.action_type == "continuous":
-                    env_action = torch.clamp(action, self.action_range[0], self.action_range[1])
-                else:
-                    env_action = action.float()
+                    if self.action_type == "continuous":
+                        env_action = torch.clamp(action, self.action_range[0], self.action_range[1])
+                    else:
+                        env_action = action.float()
 
-                next_obs, reward, terminated, truncated, _ = env.step(env_action)
-                done = (terminated | truncated).float().to(self.device)
+                    next_obs, reward, terminated, truncated, _ = env.step(env_action)
+                    done = (terminated | truncated).float().to(self.device)
 
-                log_probs_buf.append(log_prob)
-                rewards_buf.append(reward.to(self.device).squeeze())
-                dones_buf.append(done.squeeze())
+                    rewards_buf.append(reward.to(self.device).squeeze())
+                    dones_buf.append(done.squeeze())
 
                 ep_rewards += reward.to(self.device).squeeze()
                 ep_steps += 1
@@ -134,29 +137,45 @@ class MC_REINFORCE(BaseAlgorithm):
 
                 state = next_obs['policy'].to(self.device)
 
-            log_probs = torch.stack(log_probs_buf)
-            rewards = torch.stack(rewards_buf)
-            dones = torch.stack(dones_buf)
+            obs_tensor = torch.stack(obs_buf)        # (T, N, 4)
+            actions_tensor = torch.stack(actions_buf)  # (T, N, act_dim)
+            rewards = torch.stack(rewards_buf)          # (T, N)
+            dones = torch.stack(dones_buf)              # (T, N)
 
+            # Compute MC returns (no grad needed)
             G = torch.zeros(num_agents, device=self.device)
             returns = torch.zeros(T, num_agents, device=self.device)
             for t in reversed(range(T)):
                 G = rewards[t] + self.discount_factor * G * (1.0 - dones[t])
                 returns[t] = G
 
-            # Normalize PER-ENV (dim=0), not globally — critical for multi-env
+            # Normalize PER-ENV (dim=0), not globally
             mean = returns.mean(dim=0, keepdim=True)
             std = returns.std(dim=0, keepdim=True)
             returns = (returns - mean) / (std + 1e-8)
 
-            # Entropy bonus from rollout (not stale terminal state)
-            entropy = torch.stack(entropies_buf).mean()
+            # Multi-epoch update (like PPO but without clipping)
+            for _ in range(self.num_epochs):
+                # Re-evaluate log_probs and entropy with current policy
+                all_log_probs = []
+                all_entropy = []
+                for t in range(T):
+                    dist = self._get_distribution(obs_tensor[t])
+                    if self.action_type == "continuous":
+                        lp = dist.log_prob(actions_tensor[t]).sum(dim=-1)
+                    else:
+                        lp = dist.log_prob(actions_tensor[t].squeeze(-1))
+                    all_log_probs.append(lp)
+                    all_entropy.append(dist.entropy().mean())
 
-            loss = -(returns * log_probs).mean() - self.entropy_coef * entropy
-            self.optimizer.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=0.5)
-            self.optimizer.step()
+                log_probs = torch.stack(all_log_probs)   # (T, N)
+                entropy = torch.stack(all_entropy).mean()
+
+                loss = -(returns.detach() * log_probs).mean() - self.entropy_coef * entropy
+                self.optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=0.5)
+                self.optimizer.step()
 
             if total_episodes - last_log >= 100 and total_episodes > 0:
                 n_new = total_episodes - last_log

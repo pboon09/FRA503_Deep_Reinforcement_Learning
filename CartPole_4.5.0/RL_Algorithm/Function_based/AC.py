@@ -76,9 +76,10 @@ class AC(OnPolicyAlgorithm):
                  n_observations=None, hidden_dims=[None], activation=None,
                  action_type=None, init_noise_std=None, learning_rate=None,
                  discount_factor=None, value_loss_coef=None, entropy_coef=None,
-                 max_grad_norm=None):
+                 max_grad_norm=None, num_epochs=5):
 
         self.device = device if device is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.num_epochs = num_epochs
         self.policy = ActorCritic(n_observations, num_of_action, hidden_dims, activation,
                                   action_type, init_noise_std).to(self.device)
         self.optimizer = optim.Adam(self.policy.parameters(), lr=learning_rate)
@@ -108,64 +109,57 @@ class AC(OnPolicyAlgorithm):
         ep_steps = torch.zeros(num_agents, dtype=torch.int, device=self.device)
 
         while total_episodes < n_episodes:
-            log_probs_buf = []
-            values_buf = []
+            obs_buf = []
+            actions_buf = []
             rewards_buf = []
             dones_buf = []
-            entropies_buf = []
 
-            for _ in range(T):
-                self.policy._update_distribution(state)
-                action = self.policy.distribution.sample()
-                if self.action_type == "discrete":
-                    action_for_log = action.unsqueeze(-1)
-                else:
-                    action_for_log = action
+            # Collect rollout (no grad — we re-evaluate during update)
+            with torch.no_grad():
+                for _ in range(T):
+                    obs_buf.append(state.clone())
+                    self.policy._update_distribution(state)
+                    action = self.policy.distribution.sample()
+                    if self.action_type == "discrete":
+                        action = action.unsqueeze(-1)
+                    actions_buf.append(action)
 
-                log_prob = self.policy.get_actions_log_prob(action_for_log)
-                value = self.policy.evaluate(state)
-                entropy = self.policy.entropy
+                    if self.action_type == "continuous":
+                        env_action = torch.clamp(action, self.action_range[0], self.action_range[1])
+                    else:
+                        env_action = action.float()
 
-                if self.action_type == "continuous":
-                    env_action = torch.clamp(action, self.action_range[0], self.action_range[1])
-                else:
-                    env_action = action_for_log.float()
+                    next_obs, reward, terminated, truncated, _ = env.step(env_action)
+                    done = (terminated | truncated).float().to(self.device)
 
-                next_obs, reward, terminated, truncated, _ = env.step(env_action)
-                done = (terminated | truncated).float().to(self.device)
+                    rewards_buf.append(reward.to(self.device).squeeze())
+                    dones_buf.append(done.squeeze())
 
-                log_probs_buf.append(log_prob)
-                values_buf.append(value.squeeze(-1))
-                rewards_buf.append(reward.to(self.device).squeeze())
-                dones_buf.append(done.squeeze())
-                entropies_buf.append(entropy)
+                    ep_rewards += reward.to(self.device).squeeze()
+                    ep_steps += 1
+                    global_step += num_agents
+                    for i in range(num_agents):
+                        if done[i].item() > 0.5:
+                            self.episode_log.append({
+                                "episode": total_episodes,
+                                "global_step": global_step,
+                                "ep_return": ep_rewards[i].item(),
+                                "ep_length": ep_steps[i].item(),
+                            })
+                            sum_reward += ep_rewards[i].item()
+                            total_return += ep_rewards[i].item()
+                            ep_rewards[i] = 0.0
+                            ep_steps[i] = 0
+                            total_episodes += 1
 
-                ep_rewards += reward.to(self.device).squeeze()
-                ep_steps += 1
-                global_step += num_agents
-                for i in range(num_agents):
-                    if done[i].item() > 0.5:
-                        self.episode_log.append({
-                            "episode": total_episodes,
-                            "global_step": global_step,
-                            "ep_return": ep_rewards[i].item(),
-                            "ep_length": ep_steps[i].item(),
-                        })
-                        sum_reward += ep_rewards[i].item()
-                        total_return += ep_rewards[i].item()
-                        ep_rewards[i] = 0.0
-                        ep_steps[i] = 0
-                        total_episodes += 1
+                    state = next_obs['policy'].to(self.device)
 
-                state = next_obs['policy'].to(self.device)
+            obs_tensor = torch.stack(obs_buf)          # (T, N, 4)
+            actions_tensor = torch.stack(actions_buf)  # (T, N, act_dim)
+            rewards = torch.stack(rewards_buf)          # (T, N)
+            dones = torch.stack(dones_buf)              # (T, N)
 
-            log_probs = torch.stack(log_probs_buf)
-            values = torch.stack(values_buf)
-            rewards = torch.stack(rewards_buf)
-            dones = torch.stack(dones_buf)
-            entropies = torch.stack(entropies_buf)
-
-            # Bootstrap last value for non-terminated episodes
+            # Bootstrap last value
             with torch.no_grad():
                 last_value = self.policy.evaluate(state).squeeze(-1)
             G = last_value
@@ -174,20 +168,40 @@ class AC(OnPolicyAlgorithm):
                 G = rewards[t] + self.discount_factor * G * (1.0 - dones[t])
                 returns[t] = G
 
-            # Normalize advantage PER-ENV (dim=0), not globally
-            advantage = (returns - values).detach()
-            adv_mean = advantage.mean(dim=0, keepdim=True)
-            adv_std = advantage.std(dim=0, keepdim=True)
-            advantage = (advantage - adv_mean) / (adv_std + 1e-8)
-            actor_loss = -(log_probs * advantage).mean()
-            critic_loss = (values - returns.detach()).pow(2).mean()
-            entropy_loss = -self.entropy_coef * entropies.mean()
-            total_loss = actor_loss + self.value_loss_coef * critic_loss + entropy_loss
+            # Multi-epoch update (re-evaluate with current policy each epoch)
+            for _ in range(self.num_epochs):
+                all_log_probs = []
+                all_values = []
+                all_entropy = []
+                for t in range(T):
+                    self.policy._update_distribution(obs_tensor[t])
+                    if self.action_type == "continuous":
+                        lp = self.policy.get_actions_log_prob(actions_tensor[t])
+                    else:
+                        lp = self.policy.get_actions_log_prob(actions_tensor[t])
+                    all_log_probs.append(lp)
+                    all_values.append(self.policy.evaluate(obs_tensor[t]).squeeze(-1))
+                    all_entropy.append(self.policy.entropy.mean())
 
-            self.optimizer.zero_grad()
-            total_loss.backward()
-            nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
-            self.optimizer.step()
+                log_probs = torch.stack(all_log_probs)  # (T, N)
+                values = torch.stack(all_values)          # (T, N)
+                entropy = torch.stack(all_entropy).mean()
+
+                # Normalize advantage PER-ENV (dim=0)
+                advantage = (returns.detach() - values.detach())
+                adv_mean = advantage.mean(dim=0, keepdim=True)
+                adv_std = advantage.std(dim=0, keepdim=True)
+                advantage = (advantage - adv_mean) / (adv_std + 1e-8)
+
+                actor_loss = -(log_probs * advantage).mean()
+                critic_loss = (values - returns.detach()).pow(2).mean()
+                entropy_loss = -self.entropy_coef * entropy
+                total_loss = actor_loss + self.value_loss_coef * critic_loss + entropy_loss
+
+                self.optimizer.zero_grad()
+                total_loss.backward()
+                nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+                self.optimizer.step()
 
             if total_episodes - last_log >= 100 and total_episodes > 0:
                 n_new = total_episodes - last_log

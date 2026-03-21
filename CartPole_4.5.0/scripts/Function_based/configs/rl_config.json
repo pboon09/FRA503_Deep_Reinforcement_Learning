@@ -20,7 +20,7 @@
             "learning_rate": 0.002,
             "tau": 0.005,
             "initial_epsilon": 1.0,
-            "epsilon_decay": 0.00005,
+            "epsilon_decay": 0.00025,
             "final_epsilon": 0.04,
             "buffer_size": 100000,
             "batch_size": 64,
