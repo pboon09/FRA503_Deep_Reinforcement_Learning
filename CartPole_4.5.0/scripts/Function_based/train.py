@@ -168,16 +168,17 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         print(f"Saved training curve to {fig_dir}/{Algorithm_name}_training_curve.png")
         plt.close('all')
 
-        # Save CSV to experiments/ (like HW2)
+        # Save per-episode CSV to experiments/ (like HW2)
         exp_dir = os.path.join("experiments", "suite_1_baseline")
         os.makedirs(exp_dir, exist_ok=True)
         csv_path = os.path.join(exp_dir, f"{Algorithm_name}.csv")
-        with open(csv_path, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["log_index", "avg_episode_duration"])
-            for i, dur in enumerate(agent.episode_durations):
-                writer.writerow([i, dur])
-        print(f"Saved CSV to {csv_path}")
+        if agent.episode_log:
+            fieldnames = list(agent.episode_log[0].keys())
+            with open(csv_path, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(agent.episode_log)
+        print(f"Saved CSV ({len(agent.episode_log)} episodes) to {csv_path}")
 
         break
     # ==================================================================== #

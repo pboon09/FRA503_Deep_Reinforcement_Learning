@@ -37,12 +37,12 @@ def plot_learning_curves(output_dir, task="Stabilize", window=100):
             print(f"  No CSV for {algo}, skipping.")
             continue
         df = pd.read_csv(csv_path)
-        if "avg_episode_duration" in df.columns:
-            y = df["avg_episode_duration"]
+        if "ep_return" in df.columns:
+            y = df["ep_return"]
         elif "ep_length" in df.columns:
             y = df["ep_length"]
-        elif "ep_return" in df.columns:
-            y = df["ep_return"]
+        elif "avg_episode_duration" in df.columns:
+            y = df["avg_episode_duration"]
         else:
             continue
         smoothed = y.rolling(window=window, min_periods=1).mean()
@@ -90,10 +90,10 @@ def plot_training_loss(output_dir, task="Stabilize", window=100):
         if csv_path is None:
             continue
         df = pd.read_csv(csv_path)
-        if "avg_episode_duration" in df.columns:
-            loss = df["avg_episode_duration"]
-        elif "loss" in df.columns:
-            loss = df["loss"].replace(0, np.nan).dropna()
+        if "ep_length" in df.columns:
+            loss = df["ep_length"]
+        elif "ep_return" in df.columns:
+            loss = df["ep_return"]
         else:
             continue
         if len(loss) < 2:

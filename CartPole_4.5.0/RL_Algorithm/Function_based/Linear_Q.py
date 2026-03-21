@@ -61,6 +61,7 @@ class Linear_QN(BaseAlgorithm):
         states = obs['policy'].cpu().numpy()
 
         episode_rewards = np.zeros(num_agents)
+        episode_steps = np.zeros(num_agents, dtype=int)
         total_episodes = 0
         total_return = 0.0
         sum_reward = 0.0
@@ -85,14 +86,22 @@ class Linear_QN(BaseAlgorithm):
             done_np = (terminated | truncated).cpu().numpy().flatten()
 
             episode_rewards += reward_np
+            episode_steps += 1
             self.update_batch(states, action_indices, reward_np, next_states, term_np)
             self.decay_epsilon()
 
             for i in range(num_agents):
                 if done_np[i]:
+                    self.episode_log.append({
+                        "episode": total_episodes,
+                        "ep_return": float(episode_rewards[i]),
+                        "ep_length": int(episode_steps[i]),
+                        "epsilon": float(self.epsilon),
+                    })
                     sum_reward += episode_rewards[i]
                     total_return += episode_rewards[i]
                     episode_rewards[i] = 0.0
+                    episode_steps[i] = 0
                     total_episodes += 1
 
             if total_episodes - last_log >= 100 and total_episodes > 0:

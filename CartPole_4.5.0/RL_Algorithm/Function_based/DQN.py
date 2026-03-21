@@ -123,6 +123,7 @@ class DQN(OffPolicyAlgorithm):
         state = obs['policy'].to(self.device)
 
         episode_rewards = torch.zeros(num_agents, device=self.device)
+        episode_steps = torch.zeros(num_agents, dtype=torch.int, device=self.device)
         total_episodes = 0
         total_return = 0.0
         sum_reward = 0.0
@@ -149,6 +150,7 @@ class DQN(OffPolicyAlgorithm):
             done_flags = (terminated | truncated)
 
             episode_rewards += reward.to(self.device).squeeze()
+            episode_steps += 1
 
             for i in range(num_agents):
                 term_i = bool(terminated[i].item())
@@ -158,9 +160,16 @@ class DQN(OffPolicyAlgorithm):
                     reward[i].item(), next_store, term_i,
                 )
                 if done_flags[i].item():
+                    self.episode_log.append({
+                        "episode": total_episodes,
+                        "ep_return": episode_rewards[i].item(),
+                        "ep_length": episode_steps[i].item(),
+                        "epsilon": float(self.epsilon),
+                    })
                     sum_reward += episode_rewards[i].item()
                     total_return += episode_rewards[i].item()
                     episode_rewards[i] = 0.0
+                    episode_steps[i] = 0
                     total_episodes += 1
 
             self.update_policy()

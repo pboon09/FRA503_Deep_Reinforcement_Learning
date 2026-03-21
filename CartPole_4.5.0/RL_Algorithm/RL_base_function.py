@@ -46,6 +46,9 @@ class BaseAlgorithm:
         self.action_range    = action_range   # [action_min, action_max]
         self.training_error  = []
 
+        # ===== Per-episode logging (appended by learn()) ===== #
+        self.episode_log = []  # list of dicts: {episode, ep_return, ep_length, epsilon}
+
         # ===== Matplotlib / plotting (shared by all subclasses) ===== #
         self.episode_durations = []
         self.is_ipython = 'inline' in matplotlib.get_backend()

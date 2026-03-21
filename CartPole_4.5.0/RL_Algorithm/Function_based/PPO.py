@@ -334,6 +334,11 @@ class PPO(OnPolicyAlgorithm):
         obs_dict, _ = env.reset()
         obs = obs_dict["policy"].to(self.device)
 
+        # Per-env episode tracking
+        ep_rewards = torch.zeros(num_envs, device=self.device)
+        ep_steps = torch.zeros(num_envs, dtype=torch.int, device=self.device)
+        total_episodes = 0
+
         for episode in range(max_episodes):
             with torch.inference_mode():
                 for _ in range(num_transitions_per_env):
@@ -343,6 +348,20 @@ class PPO(OnPolicyAlgorithm):
                     dones = (terminated | truncated).to(self.device)
                     self.process_env_step(rewards.to(self.device), dones)
 
+                    ep_rewards += rewards.to(self.device).squeeze()
+                    ep_steps += 1
+                    for i in range(num_envs):
+                        if dones[i].item():
+                            self.episode_log.append({
+                                "episode": total_episodes,
+                                "ep_return": ep_rewards[i].item(),
+                                "ep_length": ep_steps[i].item(),
+                            })
+                            self.episode_durations.append(ep_steps[i].item())
+                            ep_rewards[i] = 0.0
+                            ep_steps[i] = 0
+                            total_episodes += 1
+
             self.compute_returns(obs)
 
             self.policy.train()
@@ -350,10 +369,9 @@ class PPO(OnPolicyAlgorithm):
 
             if episode % 100 == 0:
                 print(
-                    f"[PPO] ep {episode:5d} | "
+                    f"[PPO] iter {episode:5d} | eps_done={total_episodes} | "
                     f"surr={losses['surrogate']:.4f} | "
                     f"val={losses['value']:.4f} | "
-                    f"ent={losses['entropy']:.4f} | "
                     f"lr={self.learning_rate:.6f}"
                 )
         # ====================================== #

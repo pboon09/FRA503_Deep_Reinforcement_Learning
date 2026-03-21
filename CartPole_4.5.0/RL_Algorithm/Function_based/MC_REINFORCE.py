@@ -87,6 +87,7 @@ class MC_REINFORCE(BaseAlgorithm):
         sum_reward = 0.0
         last_log = 0
         ep_rewards = torch.zeros(num_agents, device=self.device)
+        ep_steps = torch.zeros(num_agents, dtype=torch.int, device=self.device)
 
         while total_episodes < n_episodes:
             log_probs_buf = []
@@ -110,11 +111,18 @@ class MC_REINFORCE(BaseAlgorithm):
                 dones_buf.append(done.squeeze())
 
                 ep_rewards += reward.to(self.device).squeeze()
+                ep_steps += 1
                 for i in range(num_agents):
                     if done[i].item() > 0.5:
+                        self.episode_log.append({
+                            "episode": total_episodes,
+                            "ep_return": ep_rewards[i].item(),
+                            "ep_length": ep_steps[i].item(),
+                        })
                         sum_reward += ep_rewards[i].item()
                         total_return += ep_rewards[i].item()
                         ep_rewards[i] = 0.0
+                        ep_steps[i] = 0
                         total_episodes += 1
 
                 state = next_obs['policy'].to(self.device)
