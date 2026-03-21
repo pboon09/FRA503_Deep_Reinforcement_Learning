@@ -3,6 +3,7 @@
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+import csv
 import sys
 import os
 import json
@@ -178,6 +179,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     obs, _ = env.reset()
     timestep = 0
 
+    # Deployment CSV
+    exp_dir = os.path.join("experiments", "suite_1_baseline")
+    os.makedirs(exp_dir, exist_ok=True)
+    deploy_csv_path = os.path.join(exp_dir, f"{Algorithm_name}_deploy.csv")
+    deploy_rows = []
+
     while simulation_app.is_running():
         with torch.inference_mode():
 
@@ -197,12 +204,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                         action, _ = agent.select_action(state)
                     elif Algorithm_name in ("MC_REINFORCE",):
                         agent.policy_net.eval()
-                        dist = agent._get_distribution(state)
                         if agent.action_type == "continuous":
                             action = agent.policy_net(state)
                         else:
-                            action = dist.probs.argmax(dim=-1, keepdim=True)
-                            action = agent.scale_action(action.item())
+                            logits = agent.policy_net(state)
+                            action = agent.scale_action(logits.argmax(dim=-1).item())
                     elif Algorithm_name in ("AC", "PPO"):
                         action = agent.select_action(state)
                     else:
@@ -213,7 +219,20 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                     ep_return += reward.mean().item()
                     ep_len += 1
 
+                deploy_rows.append({
+                    "algorithm": Algorithm_name,
+                    "episode": episode,
+                    "ep_return": ep_return,
+                    "ep_length": ep_len,
+                })
                 print(f"[{Algorithm_name}] Episode {episode}: return={ep_return:.2f}, length={ep_len}")
+
+        # Save deployment CSV
+        with open(deploy_csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["algorithm", "episode", "ep_return", "ep_length"])
+            writer.writeheader()
+            writer.writerows(deploy_rows)
+        print(f"Saved deployment CSV to {deploy_csv_path}")
 
         if args_cli.video:
             timestep += 1
