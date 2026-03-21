@@ -8,9 +8,9 @@
     "algorithms": {
         "Linear_Q": {
             "num_of_action": 21,
-            "learning_rate": 0.05,
+            "learning_rate": 0.01,
             "initial_epsilon": 1.0,
-            "epsilon_decay": 0.001,
+            "epsilon_decay": 0.0005,
             "final_epsilon": 0.01
         },
         "DQN": {
@@ -20,7 +20,7 @@
             "learning_rate": 0.0003,
             "tau": 0.005,
             "initial_epsilon": 1.0,
-            "epsilon_decay": 0.00005,
+            "epsilon_decay": 0.0003,
             "final_epsilon": 0.01,
             "buffer_size": 50000,
             "batch_size": 256
@@ -30,8 +30,8 @@
             "hidden_dim": 256,
             "dropout": 0.0,
             "action_type": "continuous",
-            "learning_rate": 0.0003,
-            "rollout_steps": 1024
+            "learning_rate": 0.001,
+            "rollout_steps": 512
         },
         "AC": {
             "num_of_action": 1,
@@ -39,11 +39,11 @@
             "activation": "elu",
             "action_type": "continuous",
             "init_noise_std": 1.0,
-            "learning_rate": 0.0003,
+            "learning_rate": 0.001,
             "value_loss_coef": 0.5,
             "entropy_coef": 0.01,
             "max_grad_norm": 0.5,
-            "rollout_steps": 1024
+            "rollout_steps": 512
         },
         "PPO": {
             "num_of_action": 1,
