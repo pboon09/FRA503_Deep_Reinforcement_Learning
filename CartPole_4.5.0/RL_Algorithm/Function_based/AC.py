@@ -99,6 +99,7 @@ class AC(OnPolicyAlgorithm):
         total_return = 0.0
         sum_reward = 0.0
         last_log = 0
+        global_step = 0
         ep_rewards = torch.zeros(num_agents, device=self.device)
         ep_steps = torch.zeros(num_agents, dtype=torch.int, device=self.device)
 
@@ -137,10 +138,12 @@ class AC(OnPolicyAlgorithm):
 
                 ep_rewards += reward.to(self.device).squeeze()
                 ep_steps += 1
+                global_step += num_agents
                 for i in range(num_agents):
                     if done[i].item() > 0.5:
                         self.episode_log.append({
                             "episode": total_episodes,
+                            "global_step": global_step,
                             "ep_return": ep_rewards[i].item(),
                             "ep_length": ep_steps[i].item(),
                         })

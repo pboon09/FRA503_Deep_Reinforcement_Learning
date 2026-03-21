@@ -2,249 +2,207 @@
 """Generate report figures for HW3.
 
 Figures:
-  1. fig1_learning_curves.png   — Episode return vs episode (all algos, rolling mean ± IQR)
-  2. fig2_episode_length.png    — Episode length vs episode (all algos, rolling mean)
-  3. fig3_deployment_bar.png    — Deployment performance bar chart (mean ± std)
-  4. fig4_deployment_boxplot.png — Deployment boxplot per algorithm
-  5. fig5_epsilon_decay.png     — Epsilon over episodes (value-based algos only)
+  1. fig1_sample_efficiency.png  — Return vs total env steps (fair x-axis)
+  2. fig2_learning_curves.png    — Return vs episode (standard view)
+  3. fig3_deployment_bar.png     — Deployment mean ± std bar chart
+  4. fig4_convergence_speed.png  — Steps-to-threshold horizontal bar
+  5. fig5_reward_per_step.png    — Reward efficiency (return/length) over episodes
 
-Data sources:
+Data:
   - Training:   experiments/suite_1_baseline/{algo}.csv
   - Deployment: experiments/suite_1_baseline/{algo}_deploy.csv
-
-Usage:
-    python scripts/Function_based/visualize/plot_report_figures.py
 """
 
 import argparse
 import os
-
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Constants
-# ─────────────────────────────────────────────────────────────────────────────
-
 ALGOS = ["Linear_Q", "DQN", "MC_REINFORCE", "AC", "PPO"]
 ALGO_DISPLAY = {
-    "Linear_Q": "Linear Q",
-    "DQN": "DQN",
-    "MC_REINFORCE": "MC REINFORCE",
-    "AC": "Actor-Critic",
-    "PPO": "PPO",
+    "Linear_Q": "Linear Q", "DQN": "DQN", "MC_REINFORCE": "MC REINFORCE",
+    "AC": "Actor-Critic", "PPO": "PPO",
 }
 ALGO_COLORS = {
-    "Linear_Q": "#1f77b4",
-    "DQN": "#ff7f0e",
-    "MC_REINFORCE": "#2ca02c",
-    "AC": "#d62728",
-    "PPO": "#9467bd",
+    "Linear_Q": "#1f77b4", "DQN": "#ff7f0e", "MC_REINFORCE": "#2ca02c",
+    "AC": "#d62728", "PPO": "#9467bd",
 }
 
-# visualize → Function_based → scripts → CartPole_4.5.0
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__)))))
-
 EXP_DIR = os.path.join(ROOT, "experiments", "suite_1_baseline")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
-def load_training_csv(algo):
-    path = os.path.join(EXP_DIR, f"{algo}.csv")
-    if os.path.isfile(path):
-        return pd.read_csv(path)
-    return None
+def load_csv(algo):
+    p = os.path.join(EXP_DIR, f"{algo}.csv")
+    return pd.read_csv(p) if os.path.isfile(p) else None
 
 
-def load_deploy_csv(algo):
-    path = os.path.join(EXP_DIR, f"{algo}_deploy.csv")
-    if os.path.isfile(path):
-        return pd.read_csv(path)
-    return None
-
-
-def rolling(series, w=100):
-    return series.rolling(window=w, min_periods=1).mean()
+def load_deploy(algo):
+    p = os.path.join(EXP_DIR, f"{algo}_deploy.csv")
+    return pd.read_csv(p) if os.path.isfile(p) else None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Fig 1: Learning Curves — Episode Return vs Episode
+# Fig 1: Sample Efficiency — Return vs Total Env Steps
 # ─────────────────────────────────────────────────────────────────────────────
-
-def make_fig1(output_dir, window=100):
+def make_fig1(out, window=200):
     fig, ax = plt.subplots(figsize=(14, 6))
-    plotted = False
-
     for algo in ALGOS:
-        df = load_training_csv(algo)
-        if df is None or "ep_return" not in df.columns:
-            print(f"  [fig1] No ep_return for {algo}, skipping.")
+        df = load_csv(algo)
+        if df is None or "global_step" not in df.columns:
+            print(f"  [fig1] No global_step for {algo}, skipping.")
             continue
+        x = df["global_step"].values
+        y = df["ep_return"].rolling(window, min_periods=1).mean().values
+        ax.plot(x, y, label=ALGO_DISPLAY[algo], color=ALGO_COLORS[algo], linewidth=1.5, alpha=0.9)
+    ax.set_xlabel("Total Environment Steps", fontsize=12)
+    ax.set_ylabel("Episode Return (rolling mean)", fontsize=12)
+    ax.set_title("Sample Efficiency: Return vs Environment Steps", fontsize=14)
+    ax.legend(fontsize=11)
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(os.path.join(out, "fig1_sample_efficiency.png"), dpi=150)
+    plt.close(fig)
+    print("  Saved fig1_sample_efficiency.png")
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fig 2: Learning Curves — Return vs Episode
+# ─────────────────────────────────────────────────────────────────────────────
+def make_fig2(out, window=200):
+    fig, ax = plt.subplots(figsize=(14, 6))
+    for algo in ALGOS:
+        df = load_csv(algo)
+        if df is None or "ep_return" not in df.columns:
+            continue
         y = df["ep_return"]
-        smoothed = rolling(y, window)
-        ax.plot(smoothed.values, label=ALGO_DISPLAY[algo],
-                color=ALGO_COLORS[algo], alpha=0.9, linewidth=1.5)
-        # IQR shading
+        smoothed = y.rolling(window, min_periods=1).mean()
+        ax.plot(smoothed.values, label=ALGO_DISPLAY[algo], color=ALGO_COLORS[algo], linewidth=1.5, alpha=0.9)
         q25 = y.rolling(window, min_periods=1).quantile(0.25)
         q75 = y.rolling(window, min_periods=1).quantile(0.75)
         ax.fill_between(range(len(smoothed)), q25.values, q75.values,
-                        alpha=0.12, color=ALGO_COLORS[algo])
-        plotted = True
-
+                        alpha=0.1, color=ALGO_COLORS[algo])
     ax.set_xlabel("Episode", fontsize=12)
-    ax.set_ylabel("Episode Return (rolling mean)", fontsize=12)
-    ax.set_title("Learning Efficiency: Episode Return vs Training Episode", fontsize=14)
-    if plotted:
-        ax.legend(fontsize=11)
+    ax.set_ylabel("Episode Return (rolling mean ± IQR)", fontsize=12)
+    ax.set_title("Learning Efficiency: Return vs Training Episode", fontsize=14)
+    ax.legend(fontsize=11)
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
-    fig.savefig(os.path.join(output_dir, "fig1_learning_curves.png"), dpi=150)
+    fig.savefig(os.path.join(out, "fig2_learning_curves.png"), dpi=150)
     plt.close(fig)
-    print("  Saved fig1_learning_curves.png")
+    print("  Saved fig2_learning_curves.png")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Fig 2: Episode Length vs Episode
+# Fig 3: Deployment Bar Chart
 # ─────────────────────────────────────────────────────────────────────────────
-
-def make_fig2(output_dir, window=100):
-    fig, ax = plt.subplots(figsize=(14, 6))
-    plotted = False
-
-    for algo in ALGOS:
-        df = load_training_csv(algo)
-        if df is None or "ep_length" not in df.columns:
-            print(f"  [fig2] No ep_length for {algo}, skipping.")
-            continue
-
-        y = df["ep_length"]
-        smoothed = rolling(y, window)
-        ax.plot(smoothed.values, label=ALGO_DISPLAY[algo],
-                color=ALGO_COLORS[algo], alpha=0.9, linewidth=1.5)
-        plotted = True
-
-    ax.set_xlabel("Episode", fontsize=12)
-    ax.set_ylabel("Episode Length (steps, rolling mean)", fontsize=12)
-    ax.set_title("Learning Efficiency: Episode Duration vs Training Episode", fontsize=14)
-    if plotted:
-        ax.legend(fontsize=11)
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(os.path.join(output_dir, "fig2_episode_length.png"), dpi=150)
-    plt.close(fig)
-    print("  Saved fig2_episode_length.png")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Fig 3: Deployment Performance — Bar Chart
-# ─────────────────────────────────────────────────────────────────────────────
-
-def make_fig3(output_dir):
+def make_fig3(out):
     means, stds, names, colors = [], [], [], []
-
     for algo in ALGOS:
-        df = load_deploy_csv(algo)
+        df = load_deploy(algo)
         if df is None or "ep_return" not in df.columns:
             continue
         means.append(df["ep_return"].mean())
         stds.append(df["ep_return"].std())
         names.append(ALGO_DISPLAY[algo])
         colors.append(ALGO_COLORS[algo])
-
     if not means:
-        print("  [fig3] No deployment data found, skipping.")
+        print("  [fig3] No deployment data, skipping.")
         return
-
     fig, ax = plt.subplots(figsize=(10, 5))
     x = np.arange(len(names))
-    ax.bar(x, means, yerr=stds, color=colors, capsize=6, alpha=0.85, edgecolor="black", linewidth=0.5)
+    bars = ax.bar(x, means, yerr=stds, color=colors, capsize=6, alpha=0.85,
+                  edgecolor="black", linewidth=0.5)
     ax.set_xticks(x)
     ax.set_xticklabels(names, fontsize=11)
     ax.set_ylabel("Mean Episode Return", fontsize=12)
     ax.set_title("Deployment Performance (Deterministic Policy)", fontsize=14)
     ax.grid(True, alpha=0.3, axis="y")
-
-    # Add value labels on bars
     for i, (m, s) in enumerate(zip(means, stds)):
-        ax.text(i, m + s + 1, f"{m:.1f}", ha="center", va="bottom", fontsize=10)
-
+        ax.text(i, m + s + 2, f"{m:.0f}", ha="center", va="bottom", fontsize=10, fontweight="bold")
     fig.tight_layout()
-    fig.savefig(os.path.join(output_dir, "fig3_deployment_bar.png"), dpi=150)
+    fig.savefig(os.path.join(out, "fig3_deployment_bar.png"), dpi=150)
     plt.close(fig)
     print("  Saved fig3_deployment_bar.png")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Fig 4: Deployment Boxplot
+# Fig 4: Convergence Speed — Steps to reach threshold
 # ─────────────────────────────────────────────────────────────────────────────
-
-def make_fig4(output_dir):
-    data_list, labels = [], []
-
+def make_fig4(out, threshold=200, window=100):
+    results = {}
     for algo in ALGOS:
-        df = load_deploy_csv(algo)
-        if df is None or "ep_return" not in df.columns:
+        df = load_csv(algo)
+        if df is None or "global_step" not in df.columns:
             continue
-        data_list.append(df["ep_return"].values)
-        labels.append(ALGO_DISPLAY[algo])
+        smoothed = df["ep_return"].rolling(window, min_periods=1).mean()
+        reached = smoothed[smoothed >= threshold]
+        if len(reached) > 0:
+            idx = reached.index[0]
+            results[algo] = df["global_step"].iloc[idx]
+        else:
+            results[algo] = None
 
-    if not data_list:
-        print("  [fig4] No deployment data found, skipping.")
+    if not results:
+        print("  [fig4] No data, skipping.")
         return
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    bp = ax.boxplot(data_list, labels=labels, patch_artist=True, showmeans=True)
-    for patch, algo in zip(bp["boxes"], [a for a in ALGOS if load_deploy_csv(a) is not None]):
-        patch.set_facecolor(ALGO_COLORS[algo])
-        patch.set_alpha(0.7)
-
-    ax.set_ylabel("Episode Return", fontsize=12)
-    ax.set_title("Deployment Performance Distribution", fontsize=14)
-    ax.grid(True, alpha=0.3, axis="y")
-    fig.tight_layout()
-    fig.savefig(os.path.join(output_dir, "fig4_deployment_boxplot.png"), dpi=150)
-    plt.close(fig)
-    print("  Saved fig4_deployment_boxplot.png")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Fig 5: Epsilon Decay (value-based only)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def make_fig5(output_dir):
-    fig, ax = plt.subplots(figsize=(12, 5))
-    plotted = False
-
-    for algo in ["Linear_Q", "DQN"]:
-        df = load_training_csv(algo)
-        if df is None or "epsilon" not in df.columns:
+    names, steps, colors_list = [], [], []
+    for algo in reversed(ALGOS):
+        if algo not in results:
             continue
-        ax.plot(df["epsilon"].values, label=ALGO_DISPLAY[algo],
-                color=ALGO_COLORS[algo], alpha=0.9, linewidth=1.5)
-        plotted = True
+        names.append(ALGO_DISPLAY[algo])
+        steps.append(results[algo] if results[algo] is not None else 0)
+        colors_list.append(ALGO_COLORS[algo])
 
+    y_pos = np.arange(len(names))
+    bars = ax.barh(y_pos, steps, color=colors_list, alpha=0.85, edgecolor="black", linewidth=0.5)
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(names, fontsize=11)
+    ax.set_xlabel("Total Environment Steps to Reach Threshold", fontsize=12)
+    ax.set_title(f"Convergence Speed (threshold = {threshold} return)", fontsize=14)
+    ax.grid(True, alpha=0.3, axis="x")
+
+    for i, (bar, s) in enumerate(zip(bars, steps)):
+        if s > 0:
+            ax.text(s + ax.get_xlim()[1] * 0.01, i, f"{s:,}", va="center", fontsize=10)
+        else:
+            ax.text(ax.get_xlim()[1] * 0.01, i, "DNF", va="center", fontsize=10, color="red")
+
+    fig.tight_layout()
+    fig.savefig(os.path.join(out, "fig4_convergence_speed.png"), dpi=150)
+    plt.close(fig)
+    print("  Saved fig4_convergence_speed.png")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fig 5: Reward Efficiency — Return per Step
+# ─────────────────────────────────────────────────────────────────────────────
+def make_fig5(out, window=200):
+    fig, ax = plt.subplots(figsize=(14, 6))
+    for algo in ALGOS:
+        df = load_csv(algo)
+        if df is None or "ep_return" not in df.columns or "ep_length" not in df.columns:
+            continue
+        rps = df["ep_return"] / df["ep_length"].clip(lower=1)
+        smoothed = rps.rolling(window, min_periods=1).mean()
+        ax.plot(smoothed.values, label=ALGO_DISPLAY[algo], color=ALGO_COLORS[algo], linewidth=1.5, alpha=0.9)
     ax.set_xlabel("Episode", fontsize=12)
-    ax.set_ylabel("Epsilon", fontsize=12)
-    ax.set_title("Exploration Rate (ε) Decay Over Training", fontsize=14)
-    if plotted:
-        ax.legend(fontsize=11)
+    ax.set_ylabel("Return per Step (rolling mean)", fontsize=12)
+    ax.set_title("Reward Efficiency: Average Reward per Timestep", fontsize=14)
+    ax.legend(fontsize=11)
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
-    fig.savefig(os.path.join(output_dir, "fig5_epsilon_decay.png"), dpi=150)
+    fig.savefig(os.path.join(out, "fig5_reward_per_step.png"), dpi=150)
     plt.close(fig)
-    print("  Saved fig5_epsilon_decay.png")
+    print("  Saved fig5_reward_per_step.png")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Main
-# ─────────────────────────────────────────────────────────────────────────────
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", default=os.path.join(ROOT, "figures"))
@@ -254,11 +212,11 @@ def main():
     print(f"Generating figures... (ROOT={ROOT})")
     print(f"  Looking for CSVs in: {EXP_DIR}")
 
-    make_fig1(args.output)     # Learning curves (return)
-    make_fig2(args.output)     # Episode length
-    make_fig3(args.output)     # Deployment bar
-    make_fig4(args.output)     # Deployment boxplot
-    make_fig5(args.output)     # Epsilon decay
+    make_fig1(args.output)  # Sample efficiency (return vs env steps)
+    make_fig2(args.output)  # Learning curves (return vs episode)
+    make_fig3(args.output)  # Deployment bar chart
+    make_fig4(args.output)  # Convergence speed
+    make_fig5(args.output)  # Reward per step
 
     print("Done.")
 

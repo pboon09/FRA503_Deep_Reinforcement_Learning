@@ -338,8 +338,12 @@ class PPO(OnPolicyAlgorithm):
         ep_rewards = torch.zeros(num_envs, device=self.device)
         ep_steps = torch.zeros(num_envs, dtype=torch.int, device=self.device)
         total_episodes = 0
+        iteration = 0
+        global_step = 0
+        sum_reward = 0.0
+        last_log = 0
 
-        for episode in range(max_episodes):
+        while total_episodes < max_episodes:
             with torch.inference_mode():
                 for _ in range(num_transitions_per_env):
                     actions = self.act(obs)
@@ -350,14 +354,17 @@ class PPO(OnPolicyAlgorithm):
 
                     ep_rewards += rewards.to(self.device).squeeze()
                     ep_steps += 1
+                    global_step += num_envs
                     for i in range(num_envs):
                         if dones[i].item():
                             self.episode_log.append({
                                 "episode": total_episodes,
+                                "global_step": global_step,
                                 "ep_return": ep_rewards[i].item(),
                                 "ep_length": ep_steps[i].item(),
                             })
                             self.episode_durations.append(ep_steps[i].item())
+                            sum_reward += ep_rewards[i].item()
                             ep_rewards[i] = 0.0
                             ep_steps[i] = 0
                             total_episodes += 1
@@ -366,14 +373,21 @@ class PPO(OnPolicyAlgorithm):
 
             self.policy.train()
             losses = self.update()
+            iteration += 1
 
-            if episode % 100 == 0:
+            if total_episodes - last_log >= 100 and total_episodes > 0:
+                n_new = total_episodes - last_log
+                avg = sum_reward / n_new
                 print(
-                    f"[PPO] iter {episode:5d} | eps_done={total_episodes} | "
+                    f"[PPO] iter {iteration:5d} | ep {total_episodes} | "
+                    f"avg_return={avg:.2f} | "
                     f"surr={losses['surrogate']:.4f} | "
                     f"val={losses['value']:.4f} | "
                     f"lr={self.learning_rate:.6f}"
                 )
+                self.plot_durations(timestep=int(avg))
+                sum_reward = 0.0
+                last_log = total_episodes
         # ====================================== #
 
 

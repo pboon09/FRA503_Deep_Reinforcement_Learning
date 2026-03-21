@@ -128,6 +128,7 @@ class DQN(OffPolicyAlgorithm):
         total_return = 0.0
         sum_reward = 0.0
         last_log = 0
+        global_step = 0
 
         action_min, action_max = self.action_range
 
@@ -151,6 +152,7 @@ class DQN(OffPolicyAlgorithm):
 
             episode_rewards += reward.to(self.device).squeeze()
             episode_steps += 1
+            global_step += num_agents
 
             for i in range(num_agents):
                 term_i = bool(terminated[i].item())
@@ -162,6 +164,7 @@ class DQN(OffPolicyAlgorithm):
                 if done_flags[i].item():
                     self.episode_log.append({
                         "episode": total_episodes,
+                        "global_step": global_step,
                         "ep_return": episode_rewards[i].item(),
                         "ep_length": episode_steps[i].item(),
                         "epsilon": float(self.epsilon),

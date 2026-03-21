@@ -66,6 +66,7 @@ class Linear_QN(BaseAlgorithm):
         total_return = 0.0
         sum_reward = 0.0
         last_log = 0
+        global_step = 0
 
         action_min, action_max = self.action_range
 
@@ -87,6 +88,7 @@ class Linear_QN(BaseAlgorithm):
 
             episode_rewards += reward_np
             episode_steps += 1
+            global_step += num_agents
             self.update_batch(states, action_indices, reward_np, next_states, term_np)
             self.decay_epsilon()
 
@@ -94,6 +96,7 @@ class Linear_QN(BaseAlgorithm):
                 if done_np[i]:
                     self.episode_log.append({
                         "episode": total_episodes,
+                        "global_step": global_step,
                         "ep_return": float(episode_rewards[i]),
                         "ep_length": int(episode_steps[i]),
                         "epsilon": float(self.epsilon),
