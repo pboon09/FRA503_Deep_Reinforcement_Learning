@@ -2,3 +2,7 @@
 /.vscode
 /__pycache__
 *.tex
+
+# ── HW3 Training artifacts ──
+*.pth
+*.npy

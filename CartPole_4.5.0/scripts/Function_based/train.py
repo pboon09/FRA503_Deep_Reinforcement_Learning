@@ -30,10 +30,12 @@ simulation_app = app_launcher.app
 
 """Rest everything follows."""
 
+import csv
 import gymnasium as gym
 import torch
 import random
 import matplotlib.pyplot as plt
+from datetime import datetime
 
 from isaaclab.envs import (
     DirectMARLEnv, DirectMARLEnvCfg, DirectRLEnvCfg,
@@ -158,10 +160,23 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         agent.save_model(model_dir, f"{Algorithm_name}_final{ext}")
         print("Training complete.")
 
+        # Save training curve plot
         agent.plot_durations(show_result=True)
         plt.savefig(os.path.join(model_dir, f"{Algorithm_name}_training_curve.png"), dpi=150)
         print(f"Saved training curve to {model_dir}/{Algorithm_name}_training_curve.png")
         plt.close('all')
+
+        # Save CSV log from episode_durations
+        csv_dir = os.path.join("logs", task_name, Algorithm_name)
+        os.makedirs(csv_dir, exist_ok=True)
+        csv_path = os.path.join(csv_dir, f"training_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["log_index", "avg_episode_duration"])
+            for i, dur in enumerate(agent.episode_durations):
+                writer.writerow([i, dur])
+        print(f"Saved CSV log to {csv_path}")
+
         break
     # ==================================================================== #
     env.close()
