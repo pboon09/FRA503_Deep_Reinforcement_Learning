@@ -3,6 +3,5 @@
 /__pycache__
 *.tex
 
-# ── HW3 Training artifacts ──
-*.pth
-*.npy
+# ── HW3 Training artifacts (model weights, too large for git) ──
+CartPole_4.5.0/model/

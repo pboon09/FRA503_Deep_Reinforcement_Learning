@@ -19,8 +19,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 
 def find_latest_csv(algo, task="Stabilize"):
+    # Check experiments/suite_1_baseline/ first (HW2-style)
+    exp_path = os.path.join(ROOT, "experiments", "suite_1_baseline", f"{algo}.csv")
+    if os.path.isfile(exp_path):
+        return exp_path
+    # Fallback: logs/{task}/{algo}/
     csv_dir = os.path.join(ROOT, "logs", task, algo)
-    matches = sorted(glob.glob(os.path.join(csv_dir, "training_log_*.csv")), key=os.path.getmtime)
+    matches = sorted(glob.glob(os.path.join(csv_dir, "training_*.csv")), key=os.path.getmtime)
     return matches[-1] if matches else None
 
 
@@ -32,7 +37,9 @@ def plot_learning_curves(output_dir, task="Stabilize", window=100):
             print(f"  No CSV for {algo}, skipping.")
             continue
         df = pd.read_csv(csv_path)
-        if "ep_length" in df.columns:
+        if "avg_episode_duration" in df.columns:
+            y = df["avg_episode_duration"]
+        elif "ep_length" in df.columns:
             y = df["ep_length"]
         elif "ep_return" in df.columns:
             y = df["ep_return"]
@@ -83,9 +90,12 @@ def plot_training_loss(output_dir, task="Stabilize", window=100):
         if csv_path is None:
             continue
         df = pd.read_csv(csv_path)
-        if "loss" not in df.columns:
+        if "avg_episode_duration" in df.columns:
+            loss = df["avg_episode_duration"]
+        elif "loss" in df.columns:
+            loss = df["loss"].replace(0, np.nan).dropna()
+        else:
             continue
-        loss = df["loss"].replace(0, np.nan).dropna()
         if len(loss) < 2:
             continue
         smoothed = loss.rolling(window=window, min_periods=1).mean()

@@ -160,22 +160,24 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         agent.save_model(model_dir, f"{Algorithm_name}_final{ext}")
         print("Training complete.")
 
-        # Save training curve plot
+        # Save training curve plot to figures/
+        fig_dir = os.path.join("figures")
+        os.makedirs(fig_dir, exist_ok=True)
         agent.plot_durations(show_result=True)
-        plt.savefig(os.path.join(model_dir, f"{Algorithm_name}_training_curve.png"), dpi=150)
-        print(f"Saved training curve to {model_dir}/{Algorithm_name}_training_curve.png")
+        plt.savefig(os.path.join(fig_dir, f"{Algorithm_name}_training_curve.png"), dpi=150)
+        print(f"Saved training curve to {fig_dir}/{Algorithm_name}_training_curve.png")
         plt.close('all')
 
-        # Save CSV log from episode_durations
-        csv_dir = os.path.join("logs", task_name, Algorithm_name)
-        os.makedirs(csv_dir, exist_ok=True)
-        csv_path = os.path.join(csv_dir, f"training_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+        # Save CSV to experiments/ (like HW2)
+        exp_dir = os.path.join("experiments", "suite_1_baseline")
+        os.makedirs(exp_dir, exist_ok=True)
+        csv_path = os.path.join(exp_dir, f"{Algorithm_name}.csv")
         with open(csv_path, "w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(["log_index", "avg_episode_duration"])
             for i, dur in enumerate(agent.episode_durations):
                 writer.writerow([i, dur])
-        print(f"Saved CSV log to {csv_path}")
+        print(f"Saved CSV to {csv_path}")
 
         break
     # ==================================================================== #
