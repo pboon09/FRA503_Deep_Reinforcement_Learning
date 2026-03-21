@@ -42,7 +42,9 @@ class DQN(OffPolicyAlgorithm):
             discount_factor: float = None,
             buffer_size: int = None,
             batch_size: int = None,
+            learning_starts: int = 2000,
     ) -> None:
+        self.learning_starts = learning_starts
         self.policy_net = DQN_network(n_observations, hidden_dim, num_of_action, dropout).to(device)
         self.target_net = DQN_network(n_observations, hidden_dim, num_of_action, dropout).to(device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
@@ -175,8 +177,9 @@ class DQN(OffPolicyAlgorithm):
                     episode_steps[i] = 0
                     total_episodes += 1
 
-            self.update_policy()
-            self.update_target_networks()
+            if global_step >= self.learning_starts:
+                self.update_policy()
+                self.update_target_networks()
             self.decay_epsilon()
             state = next_state
 

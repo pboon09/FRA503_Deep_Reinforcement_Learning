@@ -22,7 +22,7 @@ class MC_REINFORCE_network(nn.Module):
             nn.Linear(hidden_size, n_actions),
         )
         if self.action_type == "continuous":
-            self.log_std = nn.Parameter(torch.zeros(n_actions))
+            self.log_std = nn.Parameter(torch.full((n_actions,), -0.5))
 
     def forward(self, x):
         return self.network(x)
@@ -40,14 +40,16 @@ class MC_REINFORCE(BaseAlgorithm):
             action_type: str = None,
             learning_rate: float = None,
             discount_factor: float = None,
+            entropy_coef: float = 0.01,
     ) -> None:
         assert action_type in ("discrete", "continuous")
         self.action_type = action_type
         self.LR = learning_rate
+        self.entropy_coef = entropy_coef
         self.policy_net = MC_REINFORCE_network(
             n_observations, hidden_dim, num_of_action, dropout, action_type
         ).to(device)
-        self.optimizer = optim.AdamW(self.policy_net.parameters(), lr=learning_rate)
+        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=learning_rate)
         self.device = device
 
         super(MC_REINFORCE, self).__init__(
@@ -94,10 +96,12 @@ class MC_REINFORCE(BaseAlgorithm):
             log_probs_buf = []
             rewards_buf = []
             dones_buf = []
+            entropies_buf = []
 
             for _ in range(T):
                 dist = self._get_distribution(state)
                 action, log_prob = self._sample_action(dist)
+                entropies_buf.append(dist.entropy().mean())
 
                 if self.action_type == "continuous":
                     env_action = torch.clamp(action, self.action_range[0], self.action_range[1])
@@ -140,12 +144,18 @@ class MC_REINFORCE(BaseAlgorithm):
                 G = rewards[t] + self.discount_factor * G * (1.0 - dones[t])
                 returns[t] = G
 
-            returns = (returns - returns.mean()) / (returns.std() + 1e-8)
+            # Normalize PER-ENV (dim=0), not globally — critical for multi-env
+            mean = returns.mean(dim=0, keepdim=True)
+            std = returns.std(dim=0, keepdim=True)
+            returns = (returns - mean) / (std + 1e-8)
 
-            loss = -(returns * log_probs).mean()
+            # Entropy bonus from rollout (not stale terminal state)
+            entropy = torch.stack(entropies_buf).mean()
+
+            loss = -(returns * log_probs).mean() - self.entropy_coef * entropy
             self.optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=0.5)
             self.optimizer.step()
 
             if total_episodes - last_log >= 100 and total_episodes > 0:

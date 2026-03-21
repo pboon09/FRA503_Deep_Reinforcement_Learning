@@ -7,43 +7,45 @@
     },
     "algorithms": {
         "Linear_Q": {
-            "num_of_action": 21,
+            "num_of_action": 11,
             "learning_rate": 0.01,
             "initial_epsilon": 1.0,
             "epsilon_decay": 0.0005,
             "final_epsilon": 0.01
         },
         "DQN": {
-            "num_of_action": 21,
-            "hidden_dim": 128,
+            "num_of_action": 11,
+            "hidden_dim": 256,
             "dropout": 0.0,
-            "learning_rate": 0.0003,
+            "learning_rate": 0.002,
             "tau": 0.005,
             "initial_epsilon": 1.0,
-            "epsilon_decay": 0.0003,
-            "final_epsilon": 0.01,
-            "buffer_size": 50000,
-            "batch_size": 256
+            "epsilon_decay": 0.00005,
+            "final_epsilon": 0.04,
+            "buffer_size": 100000,
+            "batch_size": 64,
+            "learning_starts": 2000
         },
         "MC_REINFORCE": {
             "num_of_action": 1,
-            "hidden_dim": 256,
+            "hidden_dim": 64,
             "dropout": 0.0,
             "action_type": "continuous",
-            "learning_rate": 0.001,
-            "rollout_steps": 512
+            "learning_rate": 0.0003,
+            "rollout_steps": 128,
+            "entropy_coef": 0.01
         },
         "AC": {
             "num_of_action": 1,
-            "hidden_dims": [128, 128],
+            "hidden_dims": [64, 64],
             "activation": "elu",
             "action_type": "continuous",
-            "init_noise_std": 1.0,
-            "learning_rate": 0.001,
+            "init_noise_std": 0.6,
+            "learning_rate": 0.0003,
             "value_loss_coef": 0.5,
             "entropy_coef": 0.01,
             "max_grad_norm": 0.5,
-            "rollout_steps": 512
+            "rollout_steps": 32
         },
         "PPO": {
             "num_of_action": 1,

@@ -95,7 +95,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             tau=algo_cfg["tau"], initial_epsilon=algo_cfg["initial_epsilon"],
             epsilon_decay=algo_cfg["epsilon_decay"], final_epsilon=algo_cfg["final_epsilon"],
             discount_factor=shared["discount_factor"], buffer_size=algo_cfg["buffer_size"],
-            batch_size=algo_cfg["batch_size"],
+            batch_size=algo_cfg["batch_size"], learning_starts=algo_cfg.get("learning_starts", 2000),
         )
     elif Algorithm_name == "MC_REINFORCE":
         from RL_Algorithm.Function_based.MC_REINFORCE import MC_REINFORCE
@@ -105,6 +105,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             hidden_dim=algo_cfg["hidden_dim"], dropout=algo_cfg.get("dropout", 0.1),
             action_type=algo_cfg.get("action_type", "continuous"),
             learning_rate=algo_cfg["learning_rate"], discount_factor=shared["discount_factor"],
+            entropy_coef=algo_cfg.get("entropy_coef", 0.01),
         )
     elif Algorithm_name == "AC":
         from RL_Algorithm.Function_based.AC import AC

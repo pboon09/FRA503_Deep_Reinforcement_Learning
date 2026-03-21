@@ -174,9 +174,11 @@ class AC(OnPolicyAlgorithm):
                 G = rewards[t] + self.discount_factor * G * (1.0 - dones[t])
                 returns[t] = G
 
-            # Normalize ADVANTAGE (not returns) — critic needs raw returns as target
+            # Normalize advantage PER-ENV (dim=0), not globally
             advantage = (returns - values).detach()
-            advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
+            adv_mean = advantage.mean(dim=0, keepdim=True)
+            adv_std = advantage.std(dim=0, keepdim=True)
+            advantage = (advantage - adv_mean) / (adv_std + 1e-8)
             actor_loss = -(log_probs * advantage).mean()
             critic_loss = (values - returns.detach()).pow(2).mean()
             entropy_loss = -self.entropy_coef * entropies.mean()

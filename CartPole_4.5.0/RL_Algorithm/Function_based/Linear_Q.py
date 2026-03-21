@@ -26,6 +26,8 @@ class Linear_QN(BaseAlgorithm):
             discount_factor=discount_factor,
         )
         self.w = np.zeros((4, num_of_action))
+        # Normalization bounds for CartPole observations
+        self.obs_scale = np.array([2.4, 3.0, 0.21, 3.0], dtype=np.float64)
 
     def q(self, obs, a=None):
         obs = np.asarray(obs, dtype=np.float64).reshape(-1, 4)
@@ -51,7 +53,8 @@ class Linear_QN(BaseAlgorithm):
         if np.random.random() < self.epsilon:
             action_idx = np.random.randint(0, self.num_of_action)
         else:
-            q_vals = state[:4] @ self.w
+            state_norm = np.clip(state[:4] / self.obs_scale, -1.0, 1.0)
+            q_vals = state_norm @ self.w
             action_idx = int(np.argmax(q_vals))
         scaled_action = self.scale_action(action_idx)
         return scaled_action, action_idx
@@ -71,7 +74,9 @@ class Linear_QN(BaseAlgorithm):
         action_min, action_max = self.action_range
 
         while total_episodes < n_episodes:
-            q_all = states @ self.w
+            # Normalize observations
+            states_norm = np.clip(states / self.obs_scale, -1.0, 1.0)
+            q_all = states_norm @ self.w
             greedy = np.argmax(q_all, axis=1)
             random_mask = np.random.random(num_agents) < self.epsilon
             random_actions = np.random.randint(0, self.num_of_action, size=num_agents)
@@ -89,7 +94,8 @@ class Linear_QN(BaseAlgorithm):
             episode_rewards += reward_np
             episode_steps += 1
             global_step += num_agents
-            self.update_batch(states, action_indices, reward_np, next_states, term_np)
+            next_states_norm = np.clip(next_states / self.obs_scale, -1.0, 1.0)
+            self.update_batch(states_norm, action_indices, reward_np, next_states_norm, term_np)
             self.decay_epsilon()
 
             for i in range(num_agents):
