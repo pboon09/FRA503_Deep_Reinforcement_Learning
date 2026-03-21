@@ -10,300 +10,191 @@ from networks.mlp import MLP
 
 
 class ActorCritic(nn.Module):
-    def __init__(
-        self,
-        state_dim: int,
-        action_dim: int,
-        hidden_dims: list[int] = [None],
-        activation: str = None,
-        action_type: str = None,
-        init_noise_std: float = None,
-    ):
+    def __init__(self, state_dim, action_dim, hidden_dims=[None], activation=None,
+                 action_type=None, init_noise_std=None):
         super().__init__()
         assert action_type in ("continuous", "discrete")
         self.action_type = action_type
-        self.action_dim  = action_dim
-
-        self.actor  = MLP(state_dim, action_dim, hidden_dims, activation)
-        self.critic = MLP(state_dim, 1,          hidden_dims, activation)
-
+        self.action_dim = action_dim
+        self.actor = MLP(state_dim, action_dim, hidden_dims, activation)
+        self.critic = MLP(state_dim, 1, hidden_dims, activation)
         if self.action_type == "continuous":
             self.std = nn.Parameter(init_noise_std * torch.ones(action_dim))
-
-        self.distribution: Normal | Categorical | None = None
-
-    @property
-    def action_mean(self) -> torch.Tensor:
-        if self.action_type == "continuous":
-            return self.distribution.mean
-        return self.distribution.probs
+        self.distribution = None
 
     @property
-    def action_std(self) -> torch.Tensor:
-        if self.action_type == "continuous":
-            return self.distribution.stddev
-        return torch.ones_like(self.distribution.probs)
+    def action_mean(self):
+        return self.distribution.mean if self.action_type == "continuous" else self.distribution.probs
 
     @property
-    def entropy(self) -> torch.Tensor:
-        if self.action_type == "continuous":
-            return self.distribution.entropy().sum(dim=-1)
-        return self.distribution.entropy()
+    def action_std(self):
+        return self.distribution.stddev if self.action_type == "continuous" else torch.ones_like(self.distribution.probs)
+
+    @property
+    def entropy(self):
+        return self.distribution.entropy().sum(dim=-1) if self.action_type == "continuous" else self.distribution.entropy()
 
     def reset(self, dones=None):
         pass
 
     def forward(self):
-        raise NotImplementedError("Use act() or evaluate().")
+        raise NotImplementedError
 
-    def _update_distribution(self, obs: torch.Tensor) -> None:
+    def _update_distribution(self, obs):
         if self.action_type == "continuous":
-            mean = self.actor(obs)
-            self.distribution = Normal(mean, self.std.expand_as(mean))
+            self.distribution = Normal(self.actor(obs), self.std.expand_as(self.actor(obs)))
         else:
-            logits = self.actor(obs)
-            self.distribution = Categorical(logits=logits)
+            self.distribution = Categorical(logits=self.actor(obs))
 
-    def act(self, obs: torch.Tensor) -> torch.Tensor:
+    def act(self, obs):
         self._update_distribution(obs)
         actions = self.distribution.sample()
         if self.action_type == "discrete":
             actions = actions.unsqueeze(-1)
         return actions
 
-    def act_inference(self, obs: torch.Tensor) -> torch.Tensor:
+    def act_inference(self, obs):
         if self.action_type == "continuous":
             return self.actor(obs)
-        else:
-            logits = self.actor(obs)
-            return logits.argmax(dim=-1, keepdim=True)
+        return self.actor(obs).argmax(dim=-1, keepdim=True)
 
-    def evaluate(self, obs: torch.Tensor) -> torch.Tensor:
+    def evaluate(self, obs):
         return self.critic(obs)
 
-    def get_actions_log_prob(self, actions: torch.Tensor) -> torch.Tensor:
+    def get_actions_log_prob(self, actions):
         if self.action_type == "continuous":
             return self.distribution.log_prob(actions).sum(dim=-1)
-        else:
-            return self.distribution.log_prob(actions.squeeze(-1))
+        return self.distribution.log_prob(actions.squeeze(-1))
 
 
 class AC(OnPolicyAlgorithm):
-    def __init__(
-        self,
-        device=None,
-        num_of_action: int = None,
-        action_range: list = [None, None],
-        n_observations: int = None,
-        hidden_dims: list[int] = [None],
-        activation: str = None,
-        action_type: str = None,
-        init_noise_std: float = None,
-        learning_rate: float = None,
-        discount_factor: float = None,
-        value_loss_coef: float = None,
-        entropy_coef: float = None,
-        max_grad_norm: float = None,
-    ) -> None:
+    def __init__(self, device=None, num_of_action=None, action_range=[None, None],
+                 n_observations=None, hidden_dims=[None], activation=None,
+                 action_type=None, init_noise_std=None, learning_rate=None,
+                 discount_factor=None, value_loss_coef=None, entropy_coef=None,
+                 max_grad_norm=None):
 
-        self.device = device if device is not None else torch.device(
-            "cuda" if torch.cuda.is_available() else "cpu"
-        )
-
-        self.policy = ActorCritic(
-            state_dim=n_observations,
-            action_dim=num_of_action,
-            hidden_dims=hidden_dims,
-            activation=activation,
-            action_type=action_type,
-            init_noise_std=init_noise_std,
-        ).to(self.device)
-
-        self.optimizer       = optim.Adam(self.policy.parameters(), lr=learning_rate)
-        self.action_type     = action_type
+        self.device = device if device is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.policy = ActorCritic(n_observations, num_of_action, hidden_dims, activation,
+                                  action_type, init_noise_std).to(self.device)
+        self.optimizer = optim.Adam(self.policy.parameters(), lr=learning_rate)
+        self.action_type = action_type
         self.value_loss_coef = value_loss_coef
-        self.entropy_coef    = entropy_coef
-        self.max_grad_norm   = max_grad_norm
+        self.entropy_coef = entropy_coef
+        self.max_grad_norm = max_grad_norm
 
         super(AC, self).__init__(
-            num_of_action=num_of_action,
-            action_range=action_range,
-            learning_rate=learning_rate,
-            discount_factor=discount_factor,
+            num_of_action=num_of_action, action_range=action_range,
+            learning_rate=learning_rate, discount_factor=discount_factor,
         )
 
-    def generate_trajectory(self, env) -> tuple:
-        log_probs = []
-        values = []
-        rewards = []
-        entropies = []
-        episode_return = 0.0
-
-        obs, _ = env.reset()
-        done = False
-        timestep = 0
-
-        while not done:
-            state = obs['policy'].to(self.device)
-            self.policy._update_distribution(state)
-            action = self.policy.distribution.sample()
-            if self.action_type == "discrete":
-                action_for_log = action.unsqueeze(-1)
-            else:
-                action_for_log = action
-
-            log_prob = self.policy.get_actions_log_prob(action_for_log)
-            value = self.policy.evaluate(state)
-            entropy = self.policy.entropy
-
-            if self.action_type == "discrete":
-                env_action = self.scale_action(action.item())
-            else:
-                env_action = action
-
-            obs, reward, terminated, truncated, _ = env.step(env_action)
-            done = (terminated | truncated).any().item()
-
-            log_probs.append(log_prob.mean())
-            values.append(value.mean())
-            rewards.append(reward.mean().item())
-            entropies.append(entropy.mean())
-            episode_return += rewards[-1]
-            timestep += 1
-
-        log_probs_t = torch.stack(log_probs)
-        values_t = torch.stack(values).squeeze(-1)
-        rewards_t = torch.tensor(rewards, dtype=torch.float32, device=self.device)
-        self._last_entropies = torch.stack(entropies)
-
-        return episode_return, log_probs_t, values_t, rewards_t, timestep
-
-    def compute_returns(self, rewards: torch.Tensor) -> torch.Tensor:
-        T = len(rewards)
-        returns = torch.zeros(T, device=self.device)
-        G = 0.0
-        for t in reversed(range(T)):
-            G = rewards[t] + self.discount_factor * G
-            returns[t] = G
-        returns = (returns - returns.mean()) / (returns.std() + 1e-8)
-        return returns
-
-    def calculate_loss(self, log_prob_actions, values, returns):
-        advantage = (returns - values).detach()
-        actor_loss = -(log_prob_actions * advantage).mean()
-        critic_loss = nn.functional.mse_loss(values, returns)
-        return actor_loss, critic_loss
-
-    def update_policy(self, log_prob_actions, values, returns) -> float:
-        actor_loss, critic_loss = self.calculate_loss(log_prob_actions, values, returns)
-        entropy_loss = -self.entropy_coef * self._last_entropies.mean()
-        total_loss = actor_loss + self.value_loss_coef * critic_loss + entropy_loss
-
-        self.optimizer.zero_grad()
-        total_loss.backward()
-        nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
-        self.optimizer.step()
-        return total_loss.item()
-
-    def learn(self, env, max_steps: int, num_agents: int) -> tuple:
+    def learn(self, env, num_agents: int = 1, n_episodes: int = 20000):
         self.policy.train()
-
-        if num_agents <= 1:
-            episode_return, log_probs, values, rewards, timestep = \
-                self.generate_trajectory(env)
-            returns = self.compute_returns(rewards)
-            loss = self.update_policy(log_probs, values, returns)
-            return episode_return, loss, timestep
-
         T = 200
+
         obs, _ = env.reset()
         state = obs['policy'].to(self.device)
 
-        log_probs_buf = []
-        values_buf = []
-        rewards_buf = []
-        dones_buf = []
-        entropies_buf = []
+        total_episodes = 0
+        total_return = 0.0
+        sum_reward = 0.0
+        last_log = 0
+        ep_rewards = torch.zeros(num_agents, device=self.device)
 
-        for _ in range(T):
-            self.policy._update_distribution(state)
-            action = self.policy.distribution.sample()
-            if self.action_type == "discrete":
-                action_for_log = action.unsqueeze(-1)
-            else:
-                action_for_log = action
+        while total_episodes < n_episodes:
+            log_probs_buf = []
+            values_buf = []
+            rewards_buf = []
+            dones_buf = []
+            entropies_buf = []
 
-            log_prob = self.policy.get_actions_log_prob(action_for_log)
-            value = self.policy.evaluate(state)
-            entropy = self.policy.entropy
+            for _ in range(T):
+                self.policy._update_distribution(state)
+                action = self.policy.distribution.sample()
+                if self.action_type == "discrete":
+                    action_for_log = action.unsqueeze(-1)
+                else:
+                    action_for_log = action
 
-            if self.action_type == "discrete":
-                action_vals = []
+                log_prob = self.policy.get_actions_log_prob(action_for_log)
+                value = self.policy.evaluate(state)
+                entropy = self.policy.entropy
+
+                if self.action_type == "continuous":
+                    env_action = action
+                else:
+                    env_action = action_for_log.float()
+
+                next_obs, reward, terminated, truncated, _ = env.step(env_action)
+                done = (terminated | truncated).float().to(self.device)
+
+                log_probs_buf.append(log_prob)
+                values_buf.append(value.squeeze(-1))
+                rewards_buf.append(reward.to(self.device).squeeze())
+                dones_buf.append(done.squeeze())
+                entropies_buf.append(entropy)
+
+                ep_rewards += reward.to(self.device).squeeze()
                 for i in range(num_agents):
-                    action_vals.append(
-                        self.action_range[0] + (self.action_range[1] - self.action_range[0])
-                        * action[i].item() / (self.num_of_action - 1)
-                    )
-                env_action = torch.tensor(action_vals, dtype=torch.float32).unsqueeze(-1).to(self.device)
-            else:
-                env_action = action
+                    if done[i].item() > 0.5:
+                        sum_reward += ep_rewards[i].item()
+                        total_return += ep_rewards[i].item()
+                        ep_rewards[i] = 0.0
+                        total_episodes += 1
 
-            next_obs, reward, terminated, truncated, _ = env.step(env_action)
-            done = (terminated | truncated).float().to(self.device)
+                state = next_obs['policy'].to(self.device)
 
-            log_probs_buf.append(log_prob)
-            values_buf.append(value.squeeze(-1))
-            rewards_buf.append(reward.to(self.device))
-            dones_buf.append(done)
-            entropies_buf.append(entropy)
+            log_probs = torch.stack(log_probs_buf)
+            values = torch.stack(values_buf)
+            rewards = torch.stack(rewards_buf)
+            dones = torch.stack(dones_buf)
+            entropies = torch.stack(entropies_buf)
 
-            state = next_obs['policy'].to(self.device)
+            G = torch.zeros(num_agents, device=self.device)
+            returns = torch.zeros(T, num_agents, device=self.device)
+            for t in reversed(range(T)):
+                G = rewards[t] + self.discount_factor * G * (1.0 - dones[t])
+                returns[t] = G
 
-        log_probs = torch.stack(log_probs_buf)
-        values = torch.stack(values_buf)
-        rewards = torch.stack(rewards_buf)
-        dones = torch.stack(dones_buf)
-        entropies = torch.stack(entropies_buf)
+            returns_flat = returns.reshape(-1)
+            returns_flat = (returns_flat - returns_flat.mean()) / (returns_flat.std() + 1e-8)
+            returns = returns_flat.reshape(T, num_agents)
 
-        G = torch.zeros(num_agents, device=self.device)
-        returns = torch.zeros(T, num_agents, device=self.device)
-        for t in reversed(range(T)):
-            G = rewards[t] + self.discount_factor * G * (1.0 - dones[t])
-            returns[t] = G
+            advantage = (returns - values).detach()
+            actor_loss = -(log_probs * advantage).mean()
+            critic_loss = (values - returns).pow(2).mean()
+            entropy_loss = -self.entropy_coef * entropies.mean()
+            total_loss = actor_loss + self.value_loss_coef * critic_loss + entropy_loss
 
-        returns_flat = returns.reshape(-1)
-        returns_flat = (returns_flat - returns_flat.mean()) / (returns_flat.std() + 1e-8)
-        returns = returns_flat.reshape(T, num_agents)
+            self.optimizer.zero_grad()
+            total_loss.backward()
+            nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+            self.optimizer.step()
 
-        advantage = (returns - values).detach()
-        actor_loss = -(log_probs * advantage).mean()
-        critic_loss = (values - returns).pow(2).mean()
-        entropy_loss = -self.entropy_coef * entropies.mean()
-        total_loss = actor_loss + self.value_loss_coef * critic_loss + entropy_loss
+            if total_episodes - last_log >= 100 and total_episodes > 0:
+                n_new = total_episodes - last_log
+                avg = sum_reward / n_new
+                print(f"[AC] ep {total_episodes} | avg_return={avg:.2f} | loss={total_loss.item():.4f}")
+                self.plot_durations(timestep=int(avg))
+                sum_reward = 0.0
+                last_log = total_episodes
 
-        self.optimizer.zero_grad()
-        total_loss.backward()
-        nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
-        self.optimizer.step()
+        return total_return / max(total_episodes, 1), total_episodes
 
-        return rewards.sum(0).mean().item(), total_loss.item(), T
-
-    def act(self, obs: torch.Tensor) -> torch.Tensor:
+    def act(self, obs):
         return self.policy.act(obs)
 
-    def process_env_step(self, rewards, dones) -> None:
+    def process_env_step(self, rewards, dones):
         pass
 
-    def select_action(self, obs: torch.Tensor) -> torch.Tensor:
+    def select_action(self, obs):
         self.policy.eval()
         with torch.inference_mode():
             return self.policy.act_inference(obs)
 
-    def save_model(self, path: str, filename: str) -> None:
+    def save_model(self, path, filename):
         os.makedirs(path, exist_ok=True)
         torch.save(self.policy.state_dict(), os.path.join(path, filename))
 
-    def load_model(self, path: str, filename: str) -> None:
-        self.policy.load_state_dict(
-            torch.load(os.path.join(path, filename), map_location=self.device)
-        )
+    def load_model(self, path, filename):
+        self.policy.load_state_dict(torch.load(os.path.join(path, filename), map_location=self.device))

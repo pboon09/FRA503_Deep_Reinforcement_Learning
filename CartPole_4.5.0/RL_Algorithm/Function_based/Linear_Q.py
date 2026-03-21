@@ -28,20 +28,20 @@ class Linear_QN(BaseAlgorithm):
         self.w = np.zeros((4, num_of_action))
 
     def q(self, obs, a=None):
-        obs = np.asarray(obs, dtype=np.float64).flatten()[:4]
+        obs = np.asarray(obs, dtype=np.float64).reshape(-1, 4)
         if a is None:
             return obs @ self.w
-        return obs @ self.w[:, a]
+        return np.einsum('ij,j->i', obs, self.w[:, a])
 
-    def update(self, obs, action, reward, next_obs, next_action, terminated):
-        obs = np.asarray(obs, dtype=np.float64).flatten()[:4]
-        next_obs = np.asarray(next_obs, dtype=np.float64).flatten()[:4]
-        if terminated:
-            target = reward
-        else:
-            target = reward + self.discount_factor * np.max(next_obs @ self.w)
-        delta = target - (obs @ self.w[:, action])
-        self.w[:, action] += self.lr * delta * obs
+    def update_batch(self, states, actions, rewards, next_states, terminateds):
+        N = len(actions)
+        q_next_all = next_states @ self.w
+        max_q_next = np.max(q_next_all, axis=1)
+        targets = rewards + self.discount_factor * max_q_next * (1.0 - terminateds)
+        q_current = np.array([states[i] @ self.w[:, actions[i]] for i in range(N)])
+        deltas = targets - q_current
+        for i in range(N):
+            self.w[:, actions[i]] += self.lr * deltas[i] * states[i]
 
     def select_action(self, state):
         if isinstance(state, dict):
@@ -51,59 +51,60 @@ class Linear_QN(BaseAlgorithm):
         if np.random.random() < self.epsilon:
             action_idx = np.random.randint(0, self.num_of_action)
         else:
-            q_vals = self.q(state)
+            q_vals = state[:4] @ self.w
             action_idx = int(np.argmax(q_vals))
         scaled_action = self.scale_action(action_idx)
         return scaled_action, action_idx
 
-    def learn(self, env, max_steps: int, num_agents: int = 1):
+    def learn(self, env, num_agents: int = 1, n_episodes: int = 20000):
         obs, _ = env.reset()
         states = obs['policy'].cpu().numpy()
 
         episode_rewards = np.zeros(num_agents)
         total_episodes = 0
         total_return = 0.0
-        timestep = 0
+        sum_reward = 0.0
+        last_log = 0
 
-        for step in range(max_steps):
-            action_indices = []
-            for i in range(num_agents):
-                s = states[i]
-                if np.random.random() < self.epsilon:
-                    action_indices.append(np.random.randint(0, self.num_of_action))
-                else:
-                    action_indices.append(int(np.argmax(self.q(s))))
+        action_min, action_max = self.action_range
 
-            action_min, action_max = self.action_range
-            action_vals = [
-                action_min + (action_max - action_min) * a / (self.num_of_action - 1)
-                for a in action_indices
-            ]
-            action_tensor = torch.tensor([[v] for v in action_vals], dtype=torch.float32)
+        while total_episodes < n_episodes:
+            q_all = states @ self.w
+            greedy = np.argmax(q_all, axis=1)
+            random_mask = np.random.random(num_agents) < self.epsilon
+            random_actions = np.random.randint(0, self.num_of_action, size=num_agents)
+            action_indices = np.where(random_mask, random_actions, greedy)
+
+            scaled = action_min + (action_max - action_min) * action_indices.astype(np.float32) / (self.num_of_action - 1)
+            action_tensor = torch.tensor(scaled.reshape(-1, 1), dtype=torch.float32)
 
             next_obs, reward, terminated, truncated, _ = env.step(action_tensor)
             next_states = next_obs['policy'].cpu().numpy()
-            done_flags = terminated | truncated
+            reward_np = reward.cpu().numpy().flatten()
+            term_np = terminated.cpu().numpy().flatten().astype(np.float64)
+            done_np = (terminated | truncated).cpu().numpy().flatten()
+
+            episode_rewards += reward_np
+            self.update_batch(states, action_indices, reward_np, next_states, term_np)
+            self.decay_epsilon()
 
             for i in range(num_agents):
-                r_i = float(reward[i].item())
-                term_i = bool(terminated[i].item())
-                done_i = bool(done_flags[i].item())
-
-                episode_rewards[i] += r_i
-                self.update(states[i], action_indices[i], r_i, next_states[i], None, term_i)
-
-                if done_i:
+                if done_np[i]:
+                    sum_reward += episode_rewards[i]
                     total_return += episode_rewards[i]
                     episode_rewards[i] = 0.0
                     total_episodes += 1
 
-            self.decay_epsilon()
-            states = next_states
-            timestep += 1
+            if total_episodes - last_log >= 100 and total_episodes > 0:
+                n_new = total_episodes - last_log
+                print(f"[Linear_Q] ep {total_episodes} | avg_return={sum_reward/n_new:.2f} | eps={self.epsilon:.4f}")
+                self.plot_durations(timestep=int(sum_reward / n_new))
+                sum_reward = 0.0
+                last_log = total_episodes
 
-        avg_return = total_return / max(total_episodes, 1)
-        return avg_return, timestep
+            states = next_states
+
+        return total_return / max(total_episodes, 1), total_episodes
 
     def save_model(self, path: str, filename: str) -> None:
         os.makedirs(path, exist_ok=True)
