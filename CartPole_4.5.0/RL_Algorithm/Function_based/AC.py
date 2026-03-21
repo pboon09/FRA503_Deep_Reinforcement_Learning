@@ -18,6 +18,9 @@ class ActorCritic(nn.Module):
         self.action_dim = action_dim
         self.actor = MLP(state_dim, action_dim, hidden_dims, activation)
         self.critic = MLP(state_dim, 1, hidden_dims, activation)
+        # Orthogonal init (critical for PPO/AC stability)
+        self.actor.init_weights(scales=1.0)
+        self.critic.init_weights(scales=1.0)
         if self.action_type == "continuous":
             self.std = nn.Parameter(init_noise_std * torch.ones(action_dim))
         self.distribution = None
@@ -42,7 +45,8 @@ class ActorCritic(nn.Module):
 
     def _update_distribution(self, obs):
         if self.action_type == "continuous":
-            self.distribution = Normal(self.actor(obs), self.std.expand_as(self.actor(obs)))
+            mean = self.actor(obs)
+            self.distribution = Normal(mean, self.std.expand_as(mean))
         else:
             self.distribution = Categorical(logits=self.actor(obs))
 
@@ -88,9 +92,9 @@ class AC(OnPolicyAlgorithm):
             learning_rate=learning_rate, discount_factor=discount_factor,
         )
 
-    def learn(self, env, num_agents: int = 1, n_episodes: int = 20000):
+    def learn(self, env, num_agents: int = 1, n_episodes: int = 20000, rollout_steps: int = 512):
         self.policy.train()
-        T = 200
+        T = rollout_steps
 
         obs, _ = env.reset()
         state = obs['policy'].to(self.device)
@@ -123,7 +127,7 @@ class AC(OnPolicyAlgorithm):
                 entropy = self.policy.entropy
 
                 if self.action_type == "continuous":
-                    env_action = action
+                    env_action = torch.clamp(action, self.action_range[0], self.action_range[1])
                 else:
                     env_action = action_for_log.float()
 
@@ -161,19 +165,20 @@ class AC(OnPolicyAlgorithm):
             dones = torch.stack(dones_buf)
             entropies = torch.stack(entropies_buf)
 
-            G = torch.zeros(num_agents, device=self.device)
+            # Bootstrap last value for non-terminated episodes
+            with torch.no_grad():
+                last_value = self.policy.evaluate(state).squeeze(-1)
+            G = last_value
             returns = torch.zeros(T, num_agents, device=self.device)
             for t in reversed(range(T)):
                 G = rewards[t] + self.discount_factor * G * (1.0 - dones[t])
                 returns[t] = G
 
-            returns_flat = returns.reshape(-1)
-            returns_flat = (returns_flat - returns_flat.mean()) / (returns_flat.std() + 1e-8)
-            returns = returns_flat.reshape(T, num_agents)
-
+            # Normalize ADVANTAGE (not returns) — critic needs raw returns as target
             advantage = (returns - values).detach()
+            advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
             actor_loss = -(log_probs * advantage).mean()
-            critic_loss = (values - returns).pow(2).mean()
+            critic_loss = (values - returns.detach()).pow(2).mean()
             entropy_loss = -self.entropy_coef * entropies.mean()
             total_loss = actor_loss + self.value_loss_coef * critic_loss + entropy_loss
 

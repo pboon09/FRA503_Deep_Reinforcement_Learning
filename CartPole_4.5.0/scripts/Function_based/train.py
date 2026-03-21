@@ -151,9 +151,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         elif Algorithm_name == "DQN":
             agent.learn(env, num_agents=num_envs, n_episodes=n_episodes)
         elif Algorithm_name == "MC_REINFORCE":
-            agent.learn(env, num_agents=num_envs, n_episodes=n_episodes)
+            rs = algo_cfg.get("rollout_steps", 512)
+            agent.learn(env, num_agents=num_envs, n_episodes=n_episodes, rollout_steps=rs)
         elif Algorithm_name == "AC":
-            agent.learn(env, num_agents=num_envs, n_episodes=n_episodes)
+            rs = algo_cfg.get("rollout_steps", 512)
+            agent.learn(env, num_agents=num_envs, n_episodes=n_episodes, rollout_steps=rs)
 
         ext = ".npy" if Algorithm_name == "Linear_Q" else ".pth"
         agent.save_model(model_dir, f"{Algorithm_name}_final{ext}")

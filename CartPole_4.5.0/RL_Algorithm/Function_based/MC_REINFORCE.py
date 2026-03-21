@@ -74,9 +74,9 @@ class MC_REINFORCE(BaseAlgorithm):
             log_prob = dist.log_prob(action).sum(dim=-1)
         return action, log_prob
 
-    def learn(self, env, num_agents: int = 1, n_episodes: int = 20000):
+    def learn(self, env, num_agents: int = 1, n_episodes: int = 20000, rollout_steps: int = 512):
         self.policy_net.train()
-        T = 200
+        T = rollout_steps
         update_every = T
 
         obs, _ = env.reset()
@@ -100,7 +100,7 @@ class MC_REINFORCE(BaseAlgorithm):
                 action, log_prob = self._sample_action(dist)
 
                 if self.action_type == "continuous":
-                    env_action = action
+                    env_action = torch.clamp(action, self.action_range[0], self.action_range[1])
                 else:
                     env_action = action.float()
 
