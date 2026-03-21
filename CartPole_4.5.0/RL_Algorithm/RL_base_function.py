@@ -1,3 +1,4 @@
+import os
 import numpy as np
 from collections import defaultdict
 import torch
@@ -98,6 +99,10 @@ class BaseAlgorithm:
         """
         if timestep is not None:
             self.episode_durations.append(timestep)
+
+        # Skip live plotting when running headless (no display)
+        if os.environ.get("HEADLESS", "") == "1" and not show_result:
+            return
 
         plt.figure(1)
         durations_t = torch.tensor(self.episode_durations, dtype=torch.float)

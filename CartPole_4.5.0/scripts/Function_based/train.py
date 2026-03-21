@@ -143,7 +143,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     while simulation_app.is_running():
         if Algorithm_name == "PPO":
             num_transitions_per_env = algo_cfg.get("num_transitions_per_env", 16)
-            agent.learn(env, num_envs=num_envs, num_transitions_per_env=num_transitions_per_env, max_episodes=n_episodes)
+            ppo_iters = algo_cfg.get("max_iterations", 1000)
+            agent.learn(env, num_envs=num_envs, num_transitions_per_env=num_transitions_per_env, max_episodes=ppo_iters)
         elif Algorithm_name == "Linear_Q":
             agent.learn(env, num_agents=num_envs, n_episodes=n_episodes)
         elif Algorithm_name == "DQN":
@@ -158,8 +159,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         print("Training complete.")
 
         agent.plot_durations(show_result=True)
-        plt.ioff()
-        plt.show()
+        plt.savefig(os.path.join(model_dir, f"{Algorithm_name}_training_curve.png"), dpi=150)
+        print(f"Saved training curve to {model_dir}/{Algorithm_name}_training_curve.png")
+        plt.close('all')
         break
     # ==================================================================== #
     env.close()
