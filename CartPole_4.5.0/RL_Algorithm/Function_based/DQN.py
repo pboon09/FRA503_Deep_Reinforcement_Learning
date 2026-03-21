@@ -4,62 +4,28 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
+from collections import namedtuple
 from storage.off_policy import OffPolicyAlgorithm
 
 
 class DQN_network(nn.Module):
-    """
-    Neural network model for the Deep Q-Network algorithm.
-
-    Args:
-        n_observations (int): Number of input features.
-        hidden_size (int): Number of hidden neurons.
-        n_actions (int): Number of possible actions.
-        dropout (float): Dropout rate for regularization.
-    """
-
     def __init__(self, n_observations, hidden_size, n_actions, dropout):
         super(DQN_network, self).__init__()
-        # ========= put your code here ========= #
-        pass
-        # ====================================== #
+        self.net = nn.Sequential(
+            nn.Linear(n_observations, hidden_size),
+            nn.ReLU(),
+            nn.Dropout(p=dropout),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+            nn.Dropout(p=dropout),
+            nn.Linear(hidden_size, n_actions),
+        )
 
     def forward(self, x):
-        """
-        Forward pass through the network.
-
-        Args:
-            x (Tensor): Input state tensor.
-
-        Returns:
-            Tensor: Q-value estimates for each action.
-        """
-        # ========= put your code here ========= #
-        pass
-        # ====================================== #
+        return self.net(x)
 
 
 class DQN(OffPolicyAlgorithm):
-    """
-    Deep Q-Network (DQN) — off-policy, value-based.
-
-    Args:
-        device: Torch device.
-        num_of_action (int): Number of discrete actions.
-        action_range (list): [min, max] for continuous action scaling.
-        n_observations (int): Observation space dimension.
-        hidden_dim (int): Hidden layer width.
-        dropout (float): Dropout rate.
-        learning_rate (float): Adam learning rate.
-        tau (float): Polyak soft-update coefficient for target network.
-        initial_epsilon (float): Starting exploration rate.
-        epsilon_decay (float): Per-step epsilon decay.
-        final_epsilon (float): Minimum exploration rate.
-        discount_factor (float): Discount factor γ.
-        buffer_size (int): Replay buffer capacity.
-        batch_size (int): Mini-batch size per update.
-    """
-
     def __init__(
             self,
             device=None,
@@ -78,8 +44,6 @@ class DQN(OffPolicyAlgorithm):
             batch_size: int = None,
     ) -> None:
 
-        # Feel free to add or modify any of the initialized variables above.
-        # ========= put your code here ========= #
         self.policy_net = DQN_network(n_observations, hidden_dim, num_of_action, dropout).to(device)
         self.target_net = DQN_network(n_observations, hidden_dim, num_of_action, dropout).to(device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
@@ -90,8 +54,6 @@ class DQN(OffPolicyAlgorithm):
         self.tau           = tau
 
         self.optimizer = optim.AdamW(self.policy_net.parameters(), lr=learning_rate, amsgrad=True)
-        pass
-        # ====================================== #
 
         super(DQN, self).__init__(
             num_of_action=num_of_action,
@@ -105,125 +67,118 @@ class DQN(OffPolicyAlgorithm):
             batch_size=batch_size,
         )
 
-    # ------------------------------------------------------------------ #
-    # Core algorithm methods                                               #
-    # ------------------------------------------------------------------ #
-
     def select_action(self, state):
-        """
-        Select an action using an epsilon-greedy policy.
+        if torch.rand(1).item() < self.epsilon:
+            action_idx = torch.randint(0, self.num_of_action, (1,)).item()
+        else:
+            self.policy_net.eval()
+            with torch.no_grad():
+                q_values = self.policy_net(state)
+                action_idx = q_values.argmax(dim=-1).item()
+            self.policy_net.train()
 
-        Args:
-            state (Tensor): Current state.
-
-        Returns:
-            Tuple[Tensor, int]: Scaled action tensor and action index.
-        """
-        # ========= put your code here ========= #
-        pass
-        # ====================================== #
+        scaled_action = self.scale_action(action_idx)
+        return scaled_action, action_idx
 
     def calculate_loss(self, non_final_mask, non_final_next_states, state_batch, action_batch, reward_batch):
-        """
-        Compute the Bellman loss for a sampled mini-batch.
+        state_action_values = self.policy_net(state_batch).gather(1, action_batch)
 
-        Args:
-            non_final_mask (Tensor): True where next state is not terminal.
-            non_final_next_states (Tensor): Non-terminal next states.
-            state_batch (Tensor): Batch of current states.
-            action_batch (Tensor): Batch of action indices.
-            reward_batch (Tensor): Batch of rewards.
+        next_state_values = torch.zeros(state_batch.size(0), device=self.device)
+        with torch.no_grad():
+            next_state_values[non_final_mask] = (
+                self.target_net(non_final_next_states).max(dim=1).values
+            )
 
-        Returns:
-            Tensor: Scalar Huber / MSE loss.
-        """
-        # ========= put your code here ========= #
-        pass
-        # ====================================== #
+        expected_state_action_values = (
+            reward_batch + self.discount_factor * next_state_values
+        ).unsqueeze(1)
+
+        loss = F.smooth_l1_loss(state_action_values, expected_state_action_values)
+        return loss
 
     def generate_sample(self, batch_size=None):
-        """
-        Sample a mini-batch and unpack it into DQN-ready tensors.
-
-        Returns:
-            Tuple or None:
-                - non_final_mask (Tensor)
-                - non_final_next_states (Tensor)
-                - state_batch (Tensor)
-                - action_batch (Tensor)
-                - reward_batch (Tensor)
-            Returns None if the buffer is not ready.
-        """
-        # ========= put your code here ========= #
         batch = super().generate_sample()
         if batch is None:
             return None
-        # ====================================== #
 
-        # Unpack and prepare tensors from the Transition namedtuples
-        # ========= put your code here ========= #
-        pass
-        # ====================================== #
+        Transition = namedtuple('Transition', ('state', 'action', 'reward', 'next_state', 'done'))
+        unpacked = Transition(*zip(*batch))
+
+        state_batch = torch.cat(unpacked.state).to(self.device)
+        action_batch = torch.tensor(unpacked.action, dtype=torch.long, device=self.device).unsqueeze(1)
+        reward_batch = torch.tensor(unpacked.reward, dtype=torch.float32, device=self.device)
+
+        non_final_mask = torch.tensor(
+            [s is not None for s in unpacked.next_state],
+            dtype=torch.bool, device=self.device,
+        )
+        non_final_next_states = torch.cat(
+            [s for s in unpacked.next_state if s is not None]
+        ).to(self.device)
+
+        return non_final_mask, non_final_next_states, state_batch, action_batch, reward_batch
 
     def update_policy(self):
-        """Perform one gradient step on the policy network."""
         sample = self.generate_sample()
         if sample is None:
             return
         non_final_mask, non_final_next_states, state_batch, action_batch, reward_batch = sample
         loss = self.calculate_loss(non_final_mask, non_final_next_states, state_batch, action_batch, reward_batch)
 
-        # ========= put your code here ========= #
-        pass
-        # ====================================== #
+        self.optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=10.0)
+        self.optimizer.step()
 
     def update_target_networks(self):
-        # ========= put your code here ========= #
-        pass
-        # ====================================== #
+        for target_param, policy_param in zip(
+            self.target_net.parameters(), self.policy_net.parameters()
+        ):
+            target_param.data.lerp_(policy_param.data, self.tau)
 
     def learn(self, env, num_agents: int = 1, max_steps: int = 1000):
-        """
-        Train the agent for one episode (single env) or one fixed-length
-        run (parallel envs).
+        obs, _ = env.reset()
+        state = obs['policy'].to(self.device)
 
-        Args:
-            env: The Isaac Lab environment.
-            num_agents (int): Number of parallel environments.
-            max_steps (int): Steps per episode (single) or total env steps (parallel).
+        episode_return = 0.0
+        timestep = 0
 
-        Returns:
-            Tuple[float, int]: (episode_return, timestep)
-        """
+        for step in range(max_steps):
+            scaled_action, action_idx = self.select_action(state)
 
-        # ========= put your code here ========= #
-        pass
-        # ====================================== #
+            next_obs, reward, terminated, truncated, info = env.step(scaled_action)
+            next_state = next_obs['policy'].to(self.device)
 
-    # ------------------------------------------------------------------ #
-    # Persistence                                                          #
-    # ------------------------------------------------------------------ #
+            reward_val = reward.item()
+            term_val = terminated.item()
+            trunc_val = truncated.item()
+            episode_return += reward_val
+
+            next_state_store = None if term_val else next_state.cpu()
+
+            self.store_transition(
+                state.cpu(), action_idx, reward_val,
+                next_state_store, term_val,
+            )
+
+            self.update_policy()
+            self.update_target_networks()
+            self.decay_epsilon()
+
+            timestep += 1
+            state = next_state
+
+            if term_val or trunc_val:
+                break
+
+        return episode_return, timestep
 
     def save_model(self, path: str, filename: str) -> None:
-        """
-        Save policy network weights.
-
-        Args:
-            path (str): Directory to save.
-            filename (str): File name (e.g., 'dqn_cartpole.pth').
-        """
-        # ========= put your code here ========= #
-        pass
-        # ====================================== #
+        os.makedirs(path, exist_ok=True)
+        torch.save(self.policy_net.state_dict(), os.path.join(path, filename))
 
     def load_model(self, path: str, filename: str) -> None:
-        """
-        Load policy network weights and sync to target network.
-
-        Args:
-            path (str): Directory of saved model.
-            filename (str): File name (e.g., 'dqn_cartpole.pth').
-        """
-        # ========= put your code here ========= #
-        pass
-        # ====================================== #
+        self.policy_net.load_state_dict(
+            torch.load(os.path.join(path, filename), map_location=self.device)
+        )
+        self.target_net.load_state_dict(self.policy_net.state_dict())

@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 from storage.on_policy import OnPolicyAlgorithm
 from storage.buffers import RolloutBuffer
-from network.mlp import MLP
+from networks.mlp import MLP
 
 
 class ActorCritic_A2C(nn.Module):

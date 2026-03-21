@@ -1,0 +1,66 @@
+{
+    "shared": {
+        "n_episodes": 20000,
+        "n_observations": 4,
+        "action_range": [-2.5, 2.5],
+        "discount_factor": 0.99,
+        "initial_epsilon": 1.0,
+        "final_epsilon": 0.01
+    },
+    "algorithms": {
+        "Linear_Q": {
+            "num_of_action": 11,
+            "learning_rate": 0.01,
+            "initial_epsilon": 1.0,
+            "epsilon_decay": 0.0001,
+            "final_epsilon": 0.01
+        },
+        "DQN": {
+            "num_of_action": 11,
+            "hidden_dim": 128,
+            "dropout": 0.0,
+            "learning_rate": 0.0001,
+            "tau": 0.005,
+            "initial_epsilon": 1.0,
+            "epsilon_decay": 0.00005,
+            "final_epsilon": 0.05,
+            "buffer_size": 500000,
+            "batch_size": 256
+        },
+        "MC_REINFORCE": {
+            "num_of_action": 1,
+            "hidden_dim": 128,
+            "dropout": 0.1,
+            "action_type": "continuous",
+            "learning_rate": 0.001
+        },
+        "AC": {
+            "num_of_action": 1,
+            "hidden_dims": [64, 64],
+            "activation": "elu",
+            "action_type": "continuous",
+            "init_noise_std": 1.0,
+            "learning_rate": 0.0003,
+            "value_loss_coef": 0.5,
+            "entropy_coef": 0.01,
+            "max_grad_norm": 0.5
+        },
+        "PPO": {
+            "num_of_action": 1,
+            "hidden_dims": [32, 32],
+            "activation": "elu",
+            "action_type": "continuous",
+            "init_noise_std": 1.0,
+            "num_learning_epochs": 5,
+            "num_mini_batches": 4,
+            "num_transitions_per_env": 16,
+            "clip_param": 0.2,
+            "lam": 0.95,
+            "value_loss_coef": 1.0,
+            "entropy_coef": 0.005,
+            "learning_rate": 0.001,
+            "max_grad_norm": 1.0,
+            "desired_kl": 0.01
+        }
+    }
+}

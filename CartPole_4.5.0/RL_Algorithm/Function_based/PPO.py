@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -63,7 +64,6 @@ class PPO(OnPolicyAlgorithm):
         )
 
         # ===== Build ActorCritic network (imported from AC.py) ===== #
-        # Feel free to add or modify any of the initialized variables above.
         # ========= put your code here ========= #
         self.policy = ActorCritic(
             state_dim=n_observations,
@@ -106,9 +106,6 @@ class PPO(OnPolicyAlgorithm):
         """
         Sample actions for all parallel envs and populate self.transition.
 
-        Continuous: actions shape (num_envs, action_dim).
-        Discrete  : actions shape (num_envs, 1).
-
         Args:
             obs (Tensor): shape (num_envs, obs_dim).
 
@@ -116,7 +113,17 @@ class PPO(OnPolicyAlgorithm):
             Tensor: Sampled actions.
         """
         # ========= put your code here ========= #
-        pass
+        self.policy._update_distribution(obs)
+        actions = self.policy.distribution.sample()
+        if self.action_type == "discrete":
+            actions = actions.unsqueeze(-1)
+
+        self.transition.observations     = obs
+        self.transition.actions          = actions
+        self.transition.values           = self.policy.evaluate(obs)
+        self.transition.actions_log_prob = self.policy.get_actions_log_prob(actions)
+        self.transition.action_mean      = self.policy.action_mean
+        self.transition.action_sigma     = self.policy.action_std
         # ====================================== #
 
         return self.transition.actions
@@ -134,7 +141,8 @@ class PPO(OnPolicyAlgorithm):
             dones (Tensor): shape (num_envs,) or (num_envs, 1).
         """
         # ========= put your code here ========= #
-        pass
+        self.transition.rewards = rewards
+        self.transition.dones   = dones
         # ====================================== #
 
         # Flush transition into RolloutBuffer via inherited add_transition()
@@ -153,7 +161,32 @@ class PPO(OnPolicyAlgorithm):
                                Shape: (num_envs, obs_dim).
         """
         # ========= put your code here ========= #
-        pass
+        with torch.no_grad():
+            last_values = self.policy.evaluate(last_obs)
+
+        advantage = 0.0
+        for step in reversed(range(self.storage.num_transitions_per_env)):
+            if step == self.storage.num_transitions_per_env - 1:
+                next_values = last_values
+            else:
+                next_values = self.storage.values[step + 1]
+
+            next_is_not_done = 1.0 - self.storage.dones[step].float()
+
+            delta = (
+                self.storage.rewards[step]
+                + self.gamma * next_values * next_is_not_done
+                - self.storage.values[step]
+            )
+
+            advantage = delta + self.gamma * self.lam * next_is_not_done * advantage
+
+            self.storage.returns[step]    = advantage + self.storage.values[step]
+            self.storage.advantages[step] = advantage
+
+        # Normalize advantages
+        adv = self.storage.advantages
+        self.storage.advantages = (adv - adv.mean()) / (adv.std() + 1e-8)
         # ====================================== #
 
     # ------------------------------------------------------------------ #
@@ -163,9 +196,6 @@ class PPO(OnPolicyAlgorithm):
     def update(self) -> dict:
         """
         Perform PPO updates over the collected rollout.
-
-        Calls ``self.storage.mini_batch_generator()`` which now lives in
-        ``RolloutBuffer`` (storage/buffers.py) and yields 8-tuples.
 
         Returns:
             dict: Mean losses {'value', 'surrogate', 'entropy'}.
@@ -189,7 +219,68 @@ class PPO(OnPolicyAlgorithm):
             old_sigma_batch,
         ) in generator:
             # ========= put your code here ========= #
-            pass
+            # Re-evaluate under current policy
+            self.policy._update_distribution(obs_batch)
+            actions_log_prob_batch = self.policy.get_actions_log_prob(actions_batch)
+            value_batch = self.policy.evaluate(obs_batch)
+            entropy_batch = self.policy.entropy
+
+            # Per-mini-batch advantage normalization
+            if self.normalize_advantage_per_mini_batch:
+                advantages_batch = (advantages_batch - advantages_batch.mean()) / (advantages_batch.std() + 1e-8)
+
+            # KL-adaptive learning rate (continuous only)
+            if self.desired_kl is not None and self.desired_kl > 0:
+                with torch.inference_mode():
+                    kl = torch.sum(
+                        torch.log(old_sigma_batch / self.policy.action_std + 1e-5)
+                        + (old_sigma_batch**2 + (old_mu_batch - self.policy.action_mean)**2)
+                        / (2.0 * self.policy.action_std**2 + 1e-5)
+                        - 0.5,
+                        dim=-1,
+                    ).mean()
+                if kl > self.desired_kl * 2.0:
+                    self.learning_rate = max(1e-5, self.learning_rate / 1.5)
+                elif kl < self.desired_kl / 2.0:
+                    self.learning_rate = min(1e-2, self.learning_rate * 1.5)
+                for param_group in self.optimizer.param_groups:
+                    param_group["lr"] = self.learning_rate
+
+            # Clipped surrogate loss
+            ratio = torch.exp(actions_log_prob_batch - old_actions_log_prob_batch.squeeze(-1))
+            surrogate = ratio * advantages_batch.squeeze(-1)
+            surrogate_clipped = torch.clamp(
+                ratio, 1.0 - self.clip_param, 1.0 + self.clip_param
+            ) * advantages_batch.squeeze(-1)
+            surrogate_loss = -torch.min(surrogate, surrogate_clipped).mean()
+
+            # Value loss (optionally clipped)
+            if self.use_clipped_value_loss:
+                value_clipped = target_values_batch + torch.clamp(
+                    value_batch - target_values_batch,
+                    -self.clip_param, self.clip_param,
+                )
+                value_loss_unclipped = (value_batch - returns_batch).pow(2)
+                value_loss_clipped = (value_clipped - returns_batch).pow(2)
+                value_loss = torch.max(value_loss_unclipped, value_loss_clipped).mean()
+            else:
+                value_loss = (returns_batch - value_batch).pow(2).mean()
+
+            # Total loss
+            loss = (
+                surrogate_loss
+                + self.value_loss_coef * value_loss
+                - self.entropy_coef * entropy_batch.mean()
+            )
+
+            self.optimizer.zero_grad()
+            loss.backward()
+            nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+            self.optimizer.step()
+
+            mean_value_loss     += value_loss.item()
+            mean_surrogate_loss += surrogate_loss.item()
+            mean_entropy        += entropy_batch.mean().item()
             # ====================================== #
 
         num_updates          = self.num_learning_epochs * self.num_mini_batches
@@ -219,11 +310,6 @@ class PPO(OnPolicyAlgorithm):
         """
         Main PPO parallel training loop.
 
-        Calls ``_init_storage()`` (from OnPolicyAlgorithm) to create the buffer.
-
-        Continuous: actions_shape = (num_of_action,)
-        Discrete  : actions_shape = (1,)
-
         Args:
             env: Isaac Lab vectorised environment.
             num_envs (int): Number of parallel environments.
@@ -231,7 +317,45 @@ class PPO(OnPolicyAlgorithm):
             max_episodes (int): Total number of training rollouts.
         """
         # ========= put your code here ========= #
-        pass
+        if self.action_type == "continuous":
+            actions_shape = (self.num_of_action,)
+        else:
+            actions_shape = (1,)
+
+        self._init_storage(
+            num_envs=num_envs,
+            num_transitions_per_env=num_transitions_per_env,
+            obs_shape=(4,),
+            actions_shape=actions_shape,
+            device=self.device,
+        )
+
+        self.policy.train()
+        obs_dict, _ = env.reset()
+        obs = obs_dict["policy"].to(self.device)
+
+        for episode in range(max_episodes):
+            with torch.inference_mode():
+                for _ in range(num_transitions_per_env):
+                    actions = self.act(obs)
+                    obs_dict, rewards, terminated, truncated, _ = env.step(actions)
+                    obs = obs_dict["policy"].to(self.device)
+                    dones = (terminated | truncated).to(self.device)
+                    self.process_env_step(rewards.to(self.device), dones)
+
+            self.compute_returns(obs)
+
+            self.policy.train()
+            losses = self.update()
+
+            if episode % 100 == 0:
+                print(
+                    f"[PPO] ep {episode:5d} | "
+                    f"surr={losses['surrogate']:.4f} | "
+                    f"val={losses['value']:.4f} | "
+                    f"ent={losses['entropy']:.4f} | "
+                    f"lr={self.learning_rate:.6f}"
+                )
         # ====================================== #
 
 
@@ -240,38 +364,24 @@ class PPO(OnPolicyAlgorithm):
     # ------------------------------------------------------------------ #
 
     def select_action(self, obs: torch.Tensor) -> torch.Tensor:
-        """
-        Deterministic action for evaluation.
-
-        Continuous: actor mean. Discrete: argmax of logits.
-
-        Args:
-            obs (Tensor): shape (1, obs_dim) or (obs_dim,).
-        """
+        """Deterministic action for evaluation."""
         # ========= put your code here ========= #
-        pass
+        self.policy.eval()
+        with torch.inference_mode():
+            return self.policy.act_inference(obs)
         # ====================================== #
 
     def save_model(self, path: str, filename: str) -> None:
-        """
-        Save actor-critic weights.
-
-        Args:
-            path (str): Directory to save.
-            filename (str): File name (e.g., 'ppo_cartpole.pth').
-        """
+        """Save actor-critic weights."""
         # ========= put your code here ========= #
-        pass
+        os.makedirs(path, exist_ok=True)
+        torch.save(self.policy.state_dict(), os.path.join(path, filename))
         # ====================================== #
 
     def load_model(self, path: str, filename: str) -> None:
-        """
-        Load actor-critic weights.
-
-        Args:
-            path (str): Directory of saved model.
-            filename (str): File name (e.g., 'ppo_cartpole.pth').
-        """
+        """Load actor-critic weights."""
         # ========= put your code here ========= #
-        pass
+        self.policy.load_state_dict(
+            torch.load(os.path.join(path, filename), map_location=self.device)
+        )
         # ====================================== #

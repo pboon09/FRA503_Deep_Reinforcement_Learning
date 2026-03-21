@@ -6,19 +6,6 @@ from RL_Algorithm.RL_base_function import BaseAlgorithm
 
 
 class Linear_QN(BaseAlgorithm):
-    """
-    Linear Q-Learning with function approximation.
-
-    Args:
-        num_of_action (int): Number of discrete actions.
-        action_range (list): [min, max] continuous action range.
-        learning_rate (float): TD weight-update step size.
-        initial_epsilon (float): Starting exploration rate.
-        epsilon_decay (float): Per-step epsilon decay.
-        final_epsilon (float): Minimum exploration rate.
-        discount_factor (float): Discount factor γ.
-    """
-
     def __init__(
             self,
             num_of_action: int = 2,
@@ -29,7 +16,6 @@ class Linear_QN(BaseAlgorithm):
             final_epsilon: float = 0.001,
             discount_factor: float = 0.95,
     ) -> None:
-
         super().__init__(
             num_of_action=num_of_action,
             action_range=action_range,
@@ -39,112 +25,73 @@ class Linear_QN(BaseAlgorithm):
             final_epsilon=final_epsilon,
             discount_factor=discount_factor,
         )
-
-        # ===== Linear weight matrix ===== #
-        # Shape: (obs_feature_dim, num_of_action)
         self.w = np.zeros((4, num_of_action))
 
-    # ------------------------------------------------------------------ #
-    # Linear Q-value estimation                                           #
-    # ------------------------------------------------------------------ #
-
     def q(self, obs, a=None):
-        """
-        Return the linearly-estimated Q-value(s) for a given observation.
+        obs = np.asarray(obs, dtype=np.float64).flatten()[:4]
+        if a is None:
+            return obs @ self.w
+        return obs @ self.w[:, a]
 
-        Args:
-            obs: State feature vector φ(s), shape (obs_dim,).
-            a (int | None): Action index. If None, returns Q for all actions
-                            as a 1-D array of shape (num_of_action,).
+    def update(self, obs, action, reward, next_obs, next_action, terminated):
+        obs = np.asarray(obs, dtype=np.float64).flatten()[:4]
+        next_obs = np.asarray(next_obs, dtype=np.float64).flatten()[:4]
 
-        Returns:
-            float | np.ndarray: Q(s, a) scalar, or Q(s, :) array.
-        """
-        # ========= put your code here ========= #
-        pass
-        # ====================================== #
+        if terminated:
+            target = reward
+        else:
+            target = reward + self.discount_factor * np.max(next_obs @ self.w)
 
-    # ------------------------------------------------------------------ #
-    # Core algorithm methods                                               #
-    # ------------------------------------------------------------------ #
-
-    def update(
-        self,
-        obs,
-        action: int,
-        reward: float,
-        next_obs,
-        next_action: int,
-        terminated: bool,
-    ):
-        """
-        Update the weight vector using the TD error.
-
-        Args:
-            obs: Current state feature vector φ(s).
-            action (int): Action index taken in state s.
-            reward (float): Reward received.
-            next_obs: Next state feature vector φ(s').
-            next_action (int): Next action taken (for SARSA-style update).
-            terminated (bool): True if the episode ended.
-        """
-        # ========= put your code here ========= #
-        pass
-        # ====================================== #
+        delta = target - (obs @ self.w[:, action])
+        self.w[:, action] += self.lr * delta * obs
 
     def select_action(self, state):
-        """
-        Select an action using an epsilon-greedy policy over Q(s, :).
+        if isinstance(state, dict):
+            state = state['policy']
+        if isinstance(state, torch.Tensor):
+            state = state.cpu().numpy().flatten()[:4]
 
-        Args:
-            state: Current state feature vector φ(s).
+        if np.random.random() < self.epsilon:
+            action_idx = np.random.randint(0, self.num_of_action)
+        else:
+            q_vals = self.q(state)
+            action_idx = int(np.argmax(q_vals))
 
-        Returns:
-            Tuple[Tensor, int]: Scaled continuous action tensor and action index.
-        """
-        # ========= put your code here ========= #
-        pass
-        # ====================================== #
+        scaled_action = self.scale_action(action_idx)
+        return scaled_action, action_idx
 
     def learn(self, env, max_steps: int):
-        """
-        Train the agent for one episode.
+        obs, _ = env.reset()
+        state = obs['policy'].cpu().numpy().flatten()[:4]
+        total_reward = 0.0
+        timestep = 0
 
-        Args:
-            env: The environment.
-            max_steps (int): Maximum steps per episode.
+        for step in range(max_steps):
+            _, action_idx = self.select_action(state)
+            scaled_action = self.scale_action(action_idx)
 
-        Returns:
-            Tuple[float, int]: (episode_return, timestep)
-        """
-        # ========= put your code here ========= #
-        pass
-        # ====================================== #
+            next_obs, reward, terminated, truncated, _ = env.step(scaled_action)
+            next_state = next_obs['policy'].cpu().numpy().flatten()[:4]
 
-    # ------------------------------------------------------------------ #
-    # Persistence — linear weights only                                    #
-    # ------------------------------------------------------------------ #
+            r = reward.item()
+            term = terminated.item()
+            trunc = truncated.item()
+            total_reward += r
+
+            self.update(state, action_idx, r, next_state, None, term)
+            self.decay_epsilon()
+
+            timestep += 1
+            state = next_state
+
+            if term or trunc:
+                break
+
+        return total_reward, timestep
 
     def save_model(self, path: str, filename: str) -> None:
-        """
-        Save the weight matrix self.w to disk as a .npy file.
-
-        Args:
-            path (str): Directory to save the file.
-            filename (str): File name (e.g., 'linear_q_cartpole.npy').
-        """
-        # ========= put your code here ========= #
-        pass
-        # ====================================== #
+        os.makedirs(path, exist_ok=True)
+        np.save(os.path.join(path, filename), self.w)
 
     def load_model(self, path: str, filename: str) -> None:
-        """
-        Load the weight matrix self.w from a .npy file.
-
-        Args:
-            path (str): Directory containing the file.
-            filename (str): File name (e.g., 'linear_q_cartpole.npy').
-        """
-        # ========= put your code here ========= #
-        pass
-        # ====================================== #
+        self.w = np.load(os.path.join(path, filename))
