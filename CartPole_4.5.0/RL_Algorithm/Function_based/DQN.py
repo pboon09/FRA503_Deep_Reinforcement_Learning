@@ -152,7 +152,7 @@ class DQN(OffPolicyAlgorithm):
             next_state = next_obs['policy'].to(self.device)
             done_flags = (terminated | truncated)
 
-            episode_rewards += reward.to(self.device).squeeze()
+            episode_rewards += reward.to(self.device).view(-1)
             episode_steps += 1
             global_step += num_agents
 

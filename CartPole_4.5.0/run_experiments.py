@@ -11,7 +11,7 @@ PLOT_SCRIPT = os.path.join(ROOT, "scripts", "Function_based", "visualize", "plot
 
 TASK = "Stabilize-Isaac-Cartpole-v0"
 ALL_ALGOS = ["Linear_Q", "DQN", "MC_REINFORCE", "AC", "PPO"]
-ALGO_ENVS = {"PPO": 256, "Linear_Q": 1, "DQN": 1, "MC_REINFORCE": 1, "AC": 1}
+ALGO_ENVS = {"PPO": 256, "Linear_Q": 8, "DQN": 8, "MC_REINFORCE": 8, "AC": 8}
 
 
 def train(algorithm):
