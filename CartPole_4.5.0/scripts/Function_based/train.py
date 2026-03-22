@@ -82,7 +82,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         from RL_Algorithm.Function_based.Linear_Q import Linear_QN
         agent = Linear_QN(
             num_of_action=algo_cfg["num_of_action"], action_range=shared["action_range"],
-            learning_rate=algo_cfg["learning_rate"], initial_epsilon=algo_cfg["initial_epsilon"],
+            learning_rate=algo_cfg["learning_rate"], lr_decay=algo_cfg.get("lr_decay", 1.0),
+            initial_epsilon=algo_cfg["initial_epsilon"],
             epsilon_decay=algo_cfg["epsilon_decay"], final_epsilon=algo_cfg["final_epsilon"],
             discount_factor=shared["discount_factor"],
         )
@@ -119,6 +120,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             value_loss_coef=algo_cfg.get("value_loss_coef", 0.5),
             entropy_coef=algo_cfg.get("entropy_coef", 0.01),
             max_grad_norm=algo_cfg.get("max_grad_norm", 0.5),
+            num_epochs=algo_cfg.get("num_epochs", 1),
         )
     elif Algorithm_name == "PPO":
         from RL_Algorithm.Function_based.PPO import PPO

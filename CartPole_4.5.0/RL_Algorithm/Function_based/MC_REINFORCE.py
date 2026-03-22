@@ -118,24 +118,24 @@ class MC_REINFORCE(BaseAlgorithm):
                     rewards_buf.append(reward.to(self.device).squeeze())
                     dones_buf.append(done.squeeze())
 
-                ep_rewards += reward.to(self.device).squeeze()
-                ep_steps += 1
-                global_step += num_agents
-                for i in range(num_agents):
-                    if done[i].item() > 0.5:
-                        self.episode_log.append({
-                            "episode": total_episodes,
-                            "global_step": global_step,
-                            "ep_return": ep_rewards[i].item(),
-                            "ep_length": ep_steps[i].item(),
-                        })
-                        sum_reward += ep_rewards[i].item()
-                        total_return += ep_rewards[i].item()
-                        ep_rewards[i] = 0.0
-                        ep_steps[i] = 0
-                        total_episodes += 1
+                    ep_rewards += reward.to(self.device).squeeze()
+                    ep_steps += 1
+                    global_step += num_agents
+                    for i in range(num_agents):
+                        if done[i].item() > 0.5:
+                            self.episode_log.append({
+                                "episode": total_episodes,
+                                "global_step": global_step,
+                                "ep_return": ep_rewards[i].item(),
+                                "ep_length": ep_steps[i].item(),
+                            })
+                            sum_reward += ep_rewards[i].item()
+                            total_return += ep_rewards[i].item()
+                            ep_rewards[i] = 0.0
+                            ep_steps[i] = 0
+                            total_episodes += 1
 
-                state = next_obs['policy'].to(self.device)
+                    state = next_obs['policy'].to(self.device)
 
             obs_tensor = torch.stack(obs_buf)        # (T, N, 4)
             actions_tensor = torch.stack(actions_buf)  # (T, N, act_dim)

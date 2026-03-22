@@ -11,6 +11,7 @@ class Linear_QN(BaseAlgorithm):
             num_of_action: int = 2,
             action_range: list = [-2.5, 2.5],
             learning_rate: float = 0.01,
+            lr_decay: float = 1.0,
             initial_epsilon: float = 1.0,
             epsilon_decay: float = 1e-3,
             final_epsilon: float = 0.001,
@@ -25,8 +26,9 @@ class Linear_QN(BaseAlgorithm):
             final_epsilon=final_epsilon,
             discount_factor=discount_factor,
         )
+        self.lr_decay = lr_decay
+        self.lr_min = 0.001
         self.w = np.zeros((4, num_of_action))
-        # Normalization bounds for CartPole observations
         self.obs_scale = np.array([2.4, 3.0, 0.21, 3.0], dtype=np.float64)
 
     def q(self, obs, a=None):
@@ -41,9 +43,11 @@ class Linear_QN(BaseAlgorithm):
         max_q_next = np.max(q_next_all, axis=1)
         targets = rewards + self.discount_factor * max_q_next * (1.0 - terminateds)
         q_current = np.array([states[i] @ self.w[:, actions[i]] for i in range(N)])
-        deltas = targets - q_current
+        deltas = np.clip(targets - q_current, -1.0, 1.0)  # clip TD error for stability
         for i in range(N):
             self.w[:, actions[i]] += self.lr * deltas[i] * states[i]
+        # Decay learning rate
+        self.lr = max(self.lr_min, self.lr * self.lr_decay)
 
     def select_action(self, state):
         if isinstance(state, dict):
