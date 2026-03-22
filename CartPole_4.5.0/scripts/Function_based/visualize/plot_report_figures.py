@@ -46,7 +46,7 @@ ALGO_COLORS = {
     "AC": "#D55E00", "PPO": "#CC79A7",
 }
 ALGO_LINESTYLES = {
-    "Linear_Q": "-", "DQN": "--", "MC_REINFORCE": ":", "AC": "-.", "PPO": "-",
+    "Linear_Q": "-", "DQN": "-", "MC_REINFORCE": "-", "AC": "-", "PPO": "-",
 }
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(

@@ -15,10 +15,10 @@
             "final_epsilon": 0.01
         },
         "DQN": {
-            "num_of_action": 11,
-            "hidden_dim": 128,
+            "num_of_action": 21,
+            "hidden_dim": 256,
             "dropout": 0.0,
-            "learning_rate": 0.002,
+            "learning_rate": 0.001,
             "tau": 0.005,
             "initial_epsilon": 1.0,
             "epsilon_decay": 0.00025,
@@ -32,9 +32,10 @@
             "hidden_dim": 64,
             "dropout": 0.0,
             "action_type": "continuous",
-            "learning_rate": 0.0003,
+            "learning_rate": 0.001,
             "rollout_steps": 128,
-            "entropy_coef": 0.01
+            "entropy_coef": 0.01,
+            "num_epochs": 1
         },
         "AC": {
             "num_of_action": 1,

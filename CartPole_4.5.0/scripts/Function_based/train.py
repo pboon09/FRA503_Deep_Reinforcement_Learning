@@ -68,6 +68,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("device:", device)
 
+    # Set seeds for reproducibility
+    import numpy as np
+    seed = args_cli.seed if args_cli.seed is not None else 42
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+
     task_name = str(args_cli.task).split("-")[0]
     num_envs = args_cli.num_envs if args_cli.num_envs is not None else 1
 
@@ -107,6 +114,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             action_type=algo_cfg.get("action_type", "continuous"),
             learning_rate=algo_cfg["learning_rate"], discount_factor=shared["discount_factor"],
             entropy_coef=algo_cfg.get("entropy_coef", 0.01),
+            num_epochs=algo_cfg.get("num_epochs", 1),
         )
     elif Algorithm_name == "AC":
         from RL_Algorithm.Function_based.AC import AC
