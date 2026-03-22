@@ -10,14 +10,14 @@ PLAY_SCRIPT = os.path.join(ROOT, "scripts", "Function_based", "play.py")
 PLOT_SCRIPT = os.path.join(ROOT, "scripts", "Function_based", "visualize", "plot_report_figures.py")
 
 TASK = "Stabilize-Isaac-Cartpole-v0"
-NUM_ENVS = 256
 ALL_ALGOS = ["Linear_Q", "DQN", "MC_REINFORCE", "AC", "PPO"]
+ALGO_ENVS = {"PPO": 256, "Linear_Q": 1, "DQN": 1, "MC_REINFORCE": 1, "AC": 1}
 
 
 def train(algorithm):
     env = os.environ.copy()
     env["RL_ALGORITHM"] = algorithm
-    num = NUM_ENVS
+    num = ALGO_ENVS.get(algorithm, 1)
     cmd = [sys.executable, TRAIN_SCRIPT, "--task", TASK, "--num_envs", str(num), "--headless"]
     print(f"\n{'='*60}\n  TRAIN: {algorithm} (num_envs={num})\n{'='*60}")
     return subprocess.run(cmd, env=env, cwd=ROOT).returncode == 0

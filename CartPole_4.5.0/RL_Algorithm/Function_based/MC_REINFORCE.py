@@ -115,10 +115,10 @@ class MC_REINFORCE(BaseAlgorithm):
                     next_obs, reward, terminated, truncated, _ = env.step(env_action)
                     done = (terminated | truncated).float().to(self.device)
 
-                    rewards_buf.append(reward.to(self.device).squeeze())
-                    dones_buf.append(done.squeeze())
+                    rewards_buf.append(reward.to(self.device).view(-1))
+                    dones_buf.append(done.view(-1))
 
-                    ep_rewards += reward.to(self.device).squeeze()
+                    ep_rewards += reward.to(self.device).view(-1)
                     ep_steps += 1
                     global_step += num_agents
                     for i in range(num_agents):
