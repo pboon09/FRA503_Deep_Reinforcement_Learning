@@ -100,7 +100,6 @@ class Linear_QN(BaseAlgorithm):
             global_step += num_agents
             next_states_norm = np.clip(next_states / self.obs_scale, -1.0, 1.0)
             self.update_batch(states_norm, action_indices, reward_np, next_states_norm, term_np)
-            self.decay_epsilon()
 
             for i in range(num_agents):
                 if done_np[i]:
@@ -116,6 +115,7 @@ class Linear_QN(BaseAlgorithm):
                     episode_rewards[i] = 0.0
                     episode_steps[i] = 0
                     total_episodes += 1
+                    self.decay_epsilon()  # per episode, not per step
 
             if total_episodes - last_log >= 100 and total_episodes > 0:
                 n_new = total_episodes - last_log

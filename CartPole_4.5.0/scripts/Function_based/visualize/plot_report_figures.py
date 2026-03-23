@@ -86,7 +86,7 @@ def make_fig1(out):
         ax.fill_between(range(len(smoothed)),
                         (smoothed - std).values, (smoothed + std).values,
                         alpha=0.15, color=ALGO_COLORS[algo])
-    ax.axhline(y=950, color="gray", linestyle="--", alpha=0.5, label="Near-optimal (950)")
+    ax.axhline(y=950, color="gray", linestyle="--", alpha=0.3)
     ax.set_xlabel("Episode")
     ax.set_ylabel("Episode Return (rolling mean ± std)")
     ax.set_title("Learning Efficiency: Return vs Training Episode", fontweight="bold")
@@ -113,7 +113,7 @@ def make_fig2(out):
         ax.plot(df["global_step"].values, smoothed.values,
                 label=ALGO_DISPLAY[algo], color=ALGO_COLORS[algo],
                 linestyle=ALGO_LINESTYLES[algo])
-    ax.axhline(y=950, color="gray", linestyle="--", alpha=0.5, label="Near-optimal (950)")
+    ax.axhline(y=950, color="gray", linestyle="--", alpha=0.3)
     ax.set_xlabel("Total Environment Steps")
     ax.set_ylabel("Episode Return (rolling mean)")
     ax.set_title("Sample Efficiency: Return vs Environment Steps", fontweight="bold")
@@ -266,6 +266,279 @@ def make_fig5(out):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Fig 6: Epsilon Decay (value-based only)
+# ─────────────────────────────────────────────────────────────────────────────
+def make_fig6(out):
+    fig, ax = plt.subplots(figsize=(14, 5))
+    plotted = False
+    for algo in ["Linear_Q", "DQN"]:
+        df = load_csv(algo)
+        if df is None or "epsilon" not in df.columns:
+            continue
+        ax.plot(df["epsilon"].values, label=ALGO_DISPLAY[algo],
+                color=ALGO_COLORS[algo])
+        plotted = True
+    if not plotted:
+        plt.close(fig)
+        return
+    ax.set_xlabel("Episode")
+    ax.set_ylabel("Epsilon (ε)")
+    ax.set_title("Exploration Rate Decay (Value-Based Algorithms)", fontweight="bold")
+    ax.set_ylim(bottom=0, top=1.05)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(os.path.join(out, "fig6_epsilon_decay.png"), bbox_inches="tight")
+    plt.close(fig)
+    print("  Saved fig6_epsilon_decay.png")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fig 7: Episode Length over Training (survival time)
+# ─────────────────────────────────────────────────────────────────────────────
+def make_fig7(out):
+    fig, ax = plt.subplots(figsize=(14, 5))
+    for algo in ALGOS:
+        df = load_csv(algo)
+        if df is None or "ep_length" not in df.columns:
+            continue
+        y = df["ep_length"]
+        w = adaptive_window(len(y))
+        smoothed = y.rolling(w, min_periods=1).mean()
+        ax.plot(smoothed.values, label=ALGO_DISPLAY[algo],
+                color=ALGO_COLORS[algo])
+    ax.axhline(y=1000, color="gray", linestyle="--", alpha=0.3)
+    ax.set_xlabel("Episode")
+    ax.set_ylabel("Episode Length (steps, rolling mean)")
+    ax.set_title("Survival Time: Episode Length vs Training Episode", fontweight="bold")
+    ax.set_ylim(bottom=0)
+    ax.legend(loc="upper left")
+    fig.tight_layout()
+    fig.savefig(os.path.join(out, "fig7_episode_length.png"), bbox_inches="tight")
+    plt.close(fig)
+    print("  Saved fig7_episode_length.png")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fig 8: Deployment Boxplot
+# ─────────────────────────────────────────────────────────────────────────────
+def make_fig8(out):
+    data_list, labels, colors = [], [], []
+    for algo in ALGOS:
+        df = load_deploy(algo)
+        if df is None or "ep_return" not in df.columns:
+            continue
+        data_list.append(df["ep_return"].values)
+        labels.append(ALGO_DISPLAY[algo])
+        colors.append(ALGO_COLORS[algo])
+
+    if not data_list:
+        print("  [fig8] No deployment data, skipping.")
+        return
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    bp = ax.boxplot(data_list, labels=labels, patch_artist=True, showmeans=True,
+                    meanprops=dict(marker="D", markerfacecolor="white", markersize=6))
+    for patch, c in zip(bp["boxes"], colors):
+        patch.set_facecolor(c)
+        patch.set_alpha(0.7)
+    ax.set_ylabel("Episode Return")
+    ax.set_title("Deployment Performance Distribution (10 Episodes)", fontweight="bold")
+    ax.set_ylim(bottom=0)
+    fig.tight_layout()
+    fig.savefig(os.path.join(out, "fig8_deployment_boxplot.png"), bbox_inches="tight")
+    plt.close(fig)
+    print("  Saved fig8_deployment_boxplot.png")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fig 9: Policy & Value Surface (like HW2 Q-surface / policy-surface)
+# ─────────────────────────────────────────────────────────────────────────────
+def make_fig9(out):
+    """Plot policy action and value function heatmaps for AC and PPO.
+    X-axis: pole angle, Y-axis: pole angular velocity.
+    Cart pos and cart vel fixed at 0."""
+    import sys
+    sys.path.insert(0, ROOT)
+    sys.path.insert(0, os.path.join(ROOT, "RL_Algorithm"))
+
+    import torch
+
+    # Only plot for algorithms with actor-critic networks
+    ac_algos = {"AC": "AC", "PPO": "PPO"}
+    model_dir = os.path.join(ROOT, "model", "Stabilize")
+
+    loaded = {}
+    for algo, label in ac_algos.items():
+        model_path = os.path.join(model_dir, algo, f"{algo}_final.pth")
+        if not os.path.isfile(model_path):
+            continue
+        try:
+            if algo == "PPO":
+                from RL_Algorithm.Function_based.PPO import PPO
+                agent = PPO(
+                    device=torch.device("cpu"), num_of_action=1,
+                    action_range=[-2.5, 2.5], n_observations=4,
+                    hidden_dims=[64, 64], activation="elu",
+                    action_type="continuous", init_noise_std=1.0,
+                    num_learning_epochs=5, num_mini_batches=4,
+                    clip_param=0.2, gamma=0.99, lam=0.95,
+                    value_loss_coef=0.5, entropy_coef=0.01,
+                    learning_rate=0.0003, max_grad_norm=0.5, desired_kl=0.0,
+                )
+                agent.load_model(os.path.join(model_dir, algo), f"{algo}_final.pth")
+                loaded[label] = agent.policy
+            elif algo == "AC":
+                from RL_Algorithm.Function_based.AC import AC
+                agent = AC(
+                    device=torch.device("cpu"), num_of_action=1,
+                    action_range=[-2.5, 2.5], n_observations=4,
+                    hidden_dims=[64, 64], activation="elu",
+                    action_type="continuous", init_noise_std=0.6,
+                    learning_rate=0.0007, discount_factor=0.99,
+                    value_loss_coef=0.5, entropy_coef=0.01, max_grad_norm=0.5,
+                )
+                agent.load_model(os.path.join(model_dir, algo), f"{algo}_final.pth")
+                loaded[label] = agent.policy
+        except Exception as e:
+            print(f"  [fig9] Failed to load {algo}: {e}")
+
+    # Also try DQN Q-surface
+    dqn_model = None
+    dqn_path = os.path.join(model_dir, "DQN", "DQN_final.pth")
+    if os.path.isfile(dqn_path):
+        try:
+            from RL_Algorithm.Function_based.DQN import DQN
+            agent = DQN(
+                device=torch.device("cpu"), num_of_action=21,
+                action_range=[-2.5, 2.5], n_observations=4,
+                hidden_dim=256, dropout=0.0, learning_rate=0.001,
+                tau=0.005, initial_epsilon=0.0, epsilon_decay=0.0,
+                final_epsilon=0.0, discount_factor=0.99,
+                buffer_size=1000, batch_size=64,
+            )
+            agent.load_model(os.path.join(model_dir, "DQN"), "DQN_final.pth")
+            dqn_model = agent.policy_net
+        except Exception as e:
+            print(f"  [fig9] Failed to load DQN: {e}")
+
+    # Also try Linear Q
+    linear_q_w = None
+    lq_path = os.path.join(model_dir, "Linear_Q", "Linear_Q_final.npy")
+    if os.path.isfile(lq_path):
+        try:
+            linear_q_w = np.load(lq_path)
+        except Exception as e:
+            print(f"  [fig9] Failed to load Linear_Q: {e}")
+
+    n_models = len(loaded) + (1 if dqn_model else 0) + (1 if linear_q_w is not None else 0)
+    if n_models == 0:
+        print("  [fig9] No models found, skipping.")
+        return
+
+    # Grid: pole_angle vs pole_angular_velocity (cart_pos=0, cart_vel=0)
+    angle_range = np.linspace(-0.25, 0.25, 100)
+    angvel_range = np.linspace(-3.0, 3.0, 100)
+    AA, VV = np.meshgrid(angle_range, angvel_range)
+
+    # Build obs grid: [cart_pos=0, pole_angle, cart_vel=0, pole_angular_vel]
+    obs_grid = np.zeros((100 * 100, 4), dtype=np.float32)
+    obs_grid[:, 1] = AA.flatten()
+    obs_grid[:, 3] = VV.flatten()
+    obs_tensor = torch.tensor(obs_grid)
+
+    # === Policy surface (action output) ===
+    fig_pol, axes_pol = plt.subplots(1, n_models, figsize=(5 * n_models, 4), squeeze=False)
+    axes_pol = axes_pol[0]
+
+    # === Value surface ===
+    fig_val, axes_val = plt.subplots(1, n_models, figsize=(5 * n_models, 4), squeeze=False)
+    axes_val = axes_val[0]
+
+    idx = 0
+
+    # AC/PPO
+    for label, policy in loaded.items():
+        policy.eval()
+        with torch.no_grad():
+            actions = policy.act_inference(obs_tensor).numpy().reshape(100, 100)
+            values = policy.evaluate(obs_tensor).numpy().reshape(100, 100)
+
+        im = axes_pol[idx].pcolormesh(AA, VV, actions, cmap="RdBu_r", shading="auto")
+        axes_pol[idx].set_title(f"{label} — Policy (action)", fontweight="bold", fontsize=11)
+        axes_pol[idx].set_xlabel("Pole Angle (rad)")
+        axes_pol[idx].set_ylabel("Angular Velocity (rad/s)")
+        fig_pol.colorbar(im, ax=axes_pol[idx], label="Action")
+
+        im2 = axes_val[idx].pcolormesh(AA, VV, values, cmap="viridis", shading="auto")
+        axes_val[idx].set_title(f"{label} — Value V(s)", fontweight="bold", fontsize=11)
+        axes_val[idx].set_xlabel("Pole Angle (rad)")
+        axes_val[idx].set_ylabel("Angular Velocity (rad/s)")
+        fig_val.colorbar(im2, ax=axes_val[idx], label="V(s)")
+        idx += 1
+
+    # DQN Q-surface
+    if dqn_model is not None:
+        dqn_model.eval()
+        with torch.no_grad():
+            q_vals = dqn_model(obs_tensor).numpy()  # (10000, 21)
+        best_actions = q_vals.argmax(axis=1)
+        # Map action index to continuous value
+        action_values = np.linspace(-2.5, 2.5, 21)
+        actions_cont = action_values[best_actions].reshape(100, 100)
+        max_q = q_vals.max(axis=1).reshape(100, 100)
+
+        im = axes_pol[idx].pcolormesh(AA, VV, actions_cont, cmap="RdBu_r", shading="auto")
+        axes_pol[idx].set_title("DQN — Policy (best action)", fontweight="bold", fontsize=11)
+        axes_pol[idx].set_xlabel("Pole Angle (rad)")
+        axes_pol[idx].set_ylabel("Angular Velocity (rad/s)")
+        fig_pol.colorbar(im, ax=axes_pol[idx], label="Action")
+
+        im2 = axes_val[idx].pcolormesh(AA, VV, max_q, cmap="viridis", shading="auto")
+        axes_val[idx].set_title("DQN — max Q(s,a)", fontweight="bold", fontsize=11)
+        axes_val[idx].set_xlabel("Pole Angle (rad)")
+        axes_val[idx].set_ylabel("Angular Velocity (rad/s)")
+        fig_val.colorbar(im2, ax=axes_val[idx], label="max Q")
+        idx += 1
+
+    # Linear Q surface
+    if linear_q_w is not None:
+        obs_scale = np.array([2.4, 3.0, 0.21, 3.0])
+        obs_norm = np.clip(obs_grid / obs_scale, -1, 1)
+        q_all = obs_norm @ linear_q_w  # (10000, num_actions)
+        action_values_lq = np.linspace(-2.5, 2.5, linear_q_w.shape[1])
+        best_a = q_all.argmax(axis=1)
+        actions_lq = action_values_lq[best_a].reshape(100, 100)
+        max_q_lq = q_all.max(axis=1).reshape(100, 100)
+
+        im = axes_pol[idx].pcolormesh(AA, VV, actions_lq, cmap="RdBu_r", shading="auto")
+        axes_pol[idx].set_title("Linear Q — Policy (best action)", fontweight="bold", fontsize=11)
+        axes_pol[idx].set_xlabel("Pole Angle (rad)")
+        axes_pol[idx].set_ylabel("Angular Velocity (rad/s)")
+        fig_pol.colorbar(im, ax=axes_pol[idx], label="Action")
+
+        im2 = axes_val[idx].pcolormesh(AA, VV, max_q_lq, cmap="viridis", shading="auto")
+        axes_val[idx].set_title("Linear Q — max Q(s,a)", fontweight="bold", fontsize=11)
+        axes_val[idx].set_xlabel("Pole Angle (rad)")
+        axes_val[idx].set_ylabel("Angular Velocity (rad/s)")
+        fig_val.colorbar(im2, ax=axes_val[idx], label="max Q")
+        idx += 1
+
+    fig_pol.suptitle("Policy Surface: Action vs (Pole Angle, Angular Velocity)\n[cart_pos=0, cart_vel=0]",
+                     fontsize=14, fontweight="bold")
+    fig_pol.tight_layout()
+    fig_pol.savefig(os.path.join(out, "fig9_policy_surface.png"), dpi=150, bbox_inches="tight")
+    plt.close(fig_pol)
+    print("  Saved fig9_policy_surface.png")
+
+    fig_val.suptitle("Value Surface: V(s) / max Q(s,a) vs (Pole Angle, Angular Velocity)\n[cart_pos=0, cart_vel=0]",
+                     fontsize=14, fontweight="bold")
+    fig_val.tight_layout()
+    fig_val.savefig(os.path.join(out, "fig10_value_surface.png"), dpi=150, bbox_inches="tight")
+    plt.close(fig_val)
+    print("  Saved fig10_value_surface.png")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", default=os.path.join(ROOT, "figures"))
@@ -275,11 +548,15 @@ def main():
     print(f"Generating figures... (ROOT={ROOT})")
     print(f"  CSVs in: {EXP_DIR}")
 
-    make_fig1(args.output)
-    make_fig2(args.output)
-    make_fig3(args.output)
-    make_fig4(args.output)
-    make_fig5(args.output)
+    make_fig1(args.output)      # Learning curves (return vs episode)
+    make_fig2(args.output)      # Sample efficiency (return vs env steps)
+    make_fig3(args.output)      # Deployment bar + scatter
+    make_fig4(args.output)      # Convergence speed
+    make_fig5(args.output)      # Reward per step
+    make_fig6(args.output)      # Epsilon decay
+    make_fig7(args.output)      # Episode length
+    make_fig8(args.output)      # Deployment boxplot
+    make_fig9(args.output)      # Policy + value surface heatmaps
 
     print("Done.")
 
