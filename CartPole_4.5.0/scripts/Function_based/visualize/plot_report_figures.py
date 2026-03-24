@@ -336,7 +336,7 @@ def make_fig8(out):
         return
 
     fig, ax = plt.subplots(figsize=(10, 6))
-    bp = ax.boxplot(data_list, labels=labels, patch_artist=True, showmeans=True,
+    bp = ax.boxplot(data_list, tick_labels=labels, patch_artist=True, showmeans=True,
                     meanprops=dict(marker="D", markerfacecolor="white", markersize=6))
     for patch, c in zip(bp["boxes"], colors):
         patch.set_facecolor(c)
@@ -402,6 +402,23 @@ def make_fig9(out):
         except Exception as e:
             print(f"  [fig9] Failed to load {algo}: {e}")
 
+    # Try MC_REINFORCE policy
+    reinforce_net = None
+    rf_path = os.path.join(model_dir, "MC_REINFORCE", "MC_REINFORCE_final.pth")
+    if os.path.isfile(rf_path):
+        try:
+            from RL_Algorithm.Function_based.MC_REINFORCE import MC_REINFORCE
+            agent = MC_REINFORCE(
+                device=torch.device("cpu"), num_of_action=1,
+                action_range=[-2.5, 2.5], n_observations=4,
+                hidden_dim=64, dropout=0.0, action_type="continuous",
+                learning_rate=0.001, discount_factor=0.99,
+            )
+            agent.load_model(os.path.join(model_dir, "MC_REINFORCE"), "MC_REINFORCE_final.pth")
+            reinforce_net = agent.policy_net
+        except Exception as e:
+            print(f"  [fig9] Failed to load MC_REINFORCE: {e}")
+
     # Also try DQN Q-surface
     dqn_model = None
     dqn_path = os.path.join(model_dir, "DQN", "DQN_final.pth")
@@ -430,7 +447,7 @@ def make_fig9(out):
         except Exception as e:
             print(f"  [fig9] Failed to load Linear_Q: {e}")
 
-    n_models = len(loaded) + (1 if dqn_model else 0) + (1 if linear_q_w is not None else 0)
+    n_models = len(loaded) + (1 if reinforce_net else 0) + (1 if dqn_model else 0) + (1 if linear_q_w is not None else 0)
     if n_models == 0:
         print("  [fig9] No models found, skipping.")
         return
@@ -446,15 +463,10 @@ def make_fig9(out):
     obs_grid[:, 3] = VV.flatten()
     obs_tensor = torch.tensor(obs_grid)
 
-    # === Policy surface (action output) ===
-    fig_pol, axes_pol = plt.subplots(1, n_models, figsize=(5 * n_models, 4), squeeze=False)
-    axes_pol = axes_pol[0]
+    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
-    # === Value surface ===
-    fig_val, axes_val = plt.subplots(1, n_models, figsize=(5 * n_models, 4), squeeze=False)
-    axes_val = axes_val[0]
-
-    idx = 0
+    # Collect all surfaces: list of (label, actions_2d, values_2d_or_None)
+    surfaces = []
 
     # AC/PPO
     for label, policy in loaded.items():
@@ -462,67 +474,51 @@ def make_fig9(out):
         with torch.no_grad():
             actions = policy.act_inference(obs_tensor).numpy().reshape(100, 100)
             values = policy.evaluate(obs_tensor).numpy().reshape(100, 100)
+        surfaces.append((label, actions, values))
 
-        im = axes_pol[idx].pcolormesh(AA, VV, actions, cmap="RdBu_r", shading="auto")
-        axes_pol[idx].set_title(f"{label} — Policy (action)", fontweight="bold", fontsize=11)
-        axes_pol[idx].set_xlabel("Pole Angle (rad)")
-        axes_pol[idx].set_ylabel("Angular Velocity (rad/s)")
-        fig_pol.colorbar(im, ax=axes_pol[idx], label="Action")
+    # REINFORCE
+    if reinforce_net is not None:
+        reinforce_net.eval()
+        with torch.no_grad():
+            actions_rf = reinforce_net(obs_tensor).numpy().reshape(100, 100)
+        surfaces.append(("MC REINFORCE", actions_rf, None))
 
-        im2 = axes_val[idx].pcolormesh(AA, VV, values, cmap="viridis", shading="auto")
-        axes_val[idx].set_title(f"{label} — Value V(s)", fontweight="bold", fontsize=11)
-        axes_val[idx].set_xlabel("Pole Angle (rad)")
-        axes_val[idx].set_ylabel("Angular Velocity (rad/s)")
-        fig_val.colorbar(im2, ax=axes_val[idx], label="V(s)")
-        idx += 1
-
-    # DQN Q-surface
+    # DQN
     if dqn_model is not None:
         dqn_model.eval()
         with torch.no_grad():
-            q_vals = dqn_model(obs_tensor).numpy()  # (10000, 21)
-        best_actions = q_vals.argmax(axis=1)
-        # Map action index to continuous value
-        action_values = np.linspace(-2.5, 2.5, 21)
-        actions_cont = action_values[best_actions].reshape(100, 100)
+            q_vals = dqn_model(obs_tensor).numpy()
+        action_values = np.linspace(-2.5, 2.5, q_vals.shape[1])
+        actions_cont = action_values[q_vals.argmax(axis=1)].reshape(100, 100)
         max_q = q_vals.max(axis=1).reshape(100, 100)
+        surfaces.append(("DQN", actions_cont, max_q))
 
-        im = axes_pol[idx].pcolormesh(AA, VV, actions_cont, cmap="RdBu_r", shading="auto")
-        axes_pol[idx].set_title("DQN — Policy (best action)", fontweight="bold", fontsize=11)
-        axes_pol[idx].set_xlabel("Pole Angle (rad)")
-        axes_pol[idx].set_ylabel("Angular Velocity (rad/s)")
-        fig_pol.colorbar(im, ax=axes_pol[idx], label="Action")
-
-        im2 = axes_val[idx].pcolormesh(AA, VV, max_q, cmap="viridis", shading="auto")
-        axes_val[idx].set_title("DQN — max Q(s,a)", fontweight="bold", fontsize=11)
-        axes_val[idx].set_xlabel("Pole Angle (rad)")
-        axes_val[idx].set_ylabel("Angular Velocity (rad/s)")
-        fig_val.colorbar(im2, ax=axes_val[idx], label="max Q")
-        idx += 1
-
-    # Linear Q surface
+    # Linear Q
     if linear_q_w is not None:
         obs_scale = np.array([2.4, 3.0, 0.21, 3.0])
         obs_norm = np.clip(obs_grid / obs_scale, -1, 1)
-        q_all = obs_norm @ linear_q_w  # (10000, num_actions)
+        q_all = obs_norm @ linear_q_w
         action_values_lq = np.linspace(-2.5, 2.5, linear_q_w.shape[1])
-        best_a = q_all.argmax(axis=1)
-        actions_lq = action_values_lq[best_a].reshape(100, 100)
+        actions_lq = action_values_lq[q_all.argmax(axis=1)].reshape(100, 100)
         max_q_lq = q_all.max(axis=1).reshape(100, 100)
+        surfaces.append(("Linear Q", actions_lq, max_q_lq))
 
-        im = axes_pol[idx].pcolormesh(AA, VV, actions_lq, cmap="RdBu_r", shading="auto")
-        axes_pol[idx].set_title("Linear Q — Policy (best action)", fontweight="bold", fontsize=11)
-        axes_pol[idx].set_xlabel("Pole Angle (rad)")
-        axes_pol[idx].set_ylabel("Angular Velocity (rad/s)")
-        fig_pol.colorbar(im, ax=axes_pol[idx], label="Action")
+    n = len(surfaces)
+    if n == 0:
+        print("  [fig9] No surfaces to plot, skipping.")
+        return
 
-        im2 = axes_val[idx].pcolormesh(AA, VV, max_q_lq, cmap="viridis", shading="auto")
-        axes_val[idx].set_title("Linear Q — max Q(s,a)", fontweight="bold", fontsize=11)
-        axes_val[idx].set_xlabel("Pole Angle (rad)")
-        axes_val[idx].set_ylabel("Angular Velocity (rad/s)")
-        fig_val.colorbar(im2, ax=axes_val[idx], label="max Q")
-        idx += 1
-
+    # --- Fig 9: 3D Policy Surface ---
+    fig_pol = plt.figure(figsize=(6 * n, 5))
+    for i, (label, actions_2d, _) in enumerate(surfaces):
+        ax = fig_pol.add_subplot(1, n, i + 1, projection="3d")
+        ax.plot_surface(AA, VV, actions_2d, cmap="RdBu_r", alpha=0.85,
+                        rstride=2, cstride=2, edgecolor="none")
+        ax.set_xlabel("Pole Angle", fontsize=9)
+        ax.set_ylabel("Ang. Vel.", fontsize=9)
+        ax.set_zlabel("Action", fontsize=9)
+        ax.set_title(f"{label}", fontweight="bold", fontsize=11)
+        ax.view_init(elev=25, azim=-60)
     fig_pol.suptitle("Policy Surface: Action vs (Pole Angle, Angular Velocity)\n[cart_pos=0, cart_vel=0]",
                      fontsize=14, fontweight="bold")
     fig_pol.tight_layout()
@@ -530,12 +526,26 @@ def make_fig9(out):
     plt.close(fig_pol)
     print("  Saved fig9_policy_surface.png")
 
-    fig_val.suptitle("Value Surface: V(s) / max Q(s,a) vs (Pole Angle, Angular Velocity)\n[cart_pos=0, cart_vel=0]",
-                     fontsize=14, fontweight="bold")
-    fig_val.tight_layout()
-    fig_val.savefig(os.path.join(out, "fig10_value_surface.png"), dpi=150, bbox_inches="tight")
-    plt.close(fig_val)
-    print("  Saved fig10_value_surface.png")
+    # --- Fig 10: 3D Value Surface ---
+    val_surfaces = [(l, v) for l, _, v in surfaces if v is not None]
+    if val_surfaces:
+        nv = len(val_surfaces)
+        fig_val = plt.figure(figsize=(6 * nv, 5))
+        for i, (label, values_2d) in enumerate(val_surfaces):
+            ax = fig_val.add_subplot(1, nv, i + 1, projection="3d")
+            ax.plot_surface(AA, VV, values_2d, cmap="viridis", alpha=0.85,
+                            rstride=2, cstride=2, edgecolor="none")
+            ax.set_xlabel("Pole Angle", fontsize=9)
+            ax.set_ylabel("Ang. Vel.", fontsize=9)
+            ax.set_zlabel("V(s) / max Q", fontsize=9)
+            ax.set_title(f"{label}", fontweight="bold", fontsize=11)
+            ax.view_init(elev=25, azim=-60)
+        fig_val.suptitle("Value Surface: V(s) / max Q(s,a) vs (Pole Angle, Angular Velocity)\n[cart_pos=0, cart_vel=0]",
+                         fontsize=14, fontweight="bold")
+        fig_val.tight_layout()
+        fig_val.savefig(os.path.join(out, "fig10_value_surface.png"), dpi=150, bbox_inches="tight")
+        plt.close(fig_val)
+        print("  Saved fig10_value_surface.png")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

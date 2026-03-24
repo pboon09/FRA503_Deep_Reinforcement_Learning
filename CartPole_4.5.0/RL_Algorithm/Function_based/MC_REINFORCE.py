@@ -193,5 +193,5 @@ class MC_REINFORCE(BaseAlgorithm):
 
     def load_model(self, path: str, filename: str) -> None:
         self.policy_net.load_state_dict(
-            torch.load(os.path.join(path, filename), map_location=self.device)
+            torch.load(os.path.join(path, filename), map_location=self.device, weights_only=True)
         )

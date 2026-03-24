@@ -229,4 +229,4 @@ class AC(OnPolicyAlgorithm):
         torch.save(self.policy.state_dict(), os.path.join(path, filename))
 
     def load_model(self, path, filename):
-        self.policy.load_state_dict(torch.load(os.path.join(path, filename), map_location=self.device))
+        self.policy.load_state_dict(torch.load(os.path.join(path, filename), map_location=self.device, weights_only=True))
