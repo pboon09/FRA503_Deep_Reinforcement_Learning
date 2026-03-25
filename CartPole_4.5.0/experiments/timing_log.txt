@@ -1,40 +1,40 @@
 ============================================================
-Run started at 2026-03-25 21:46:18
-Suites: {'TRAIN', 'PLOTS', 'DEPLOY'}
-Algo envs: {'PPO': 256, 'AC': 256, 'MC_REINFORCE': 64, 'DQN': 32, 'Linear_Q': 32}
+Run started at 2026-03-25 22:36:26
+Suites: {'PLOTS', 'TRAIN', 'DEPLOY'}
+Algo envs: {'PPO': 256, 'AC': 16, 'MC_REINFORCE': 16, 'DQN': 32, 'Linear_Q': 32}
 ============================================================
 
-[TRAIN] Linear_Q (num_envs=32) started at 2026-03-25 21:46:18
-[TRAIN] Linear_Q finished at 2026-03-25 21:49:35 | elapsed 3.3 min | OK
+[TRAIN] Linear_Q (num_envs=32) started at 2026-03-25 22:36:26
+[TRAIN] Linear_Q finished at 2026-03-25 22:39:37 | elapsed 3.2 min | OK
 
-[TRAIN] DQN (num_envs=32) started at 2026-03-25 21:49:35
-[TRAIN] DQN finished at 2026-03-25 21:53:39 | elapsed 4.1 min | OK
+[TRAIN] DQN (num_envs=32) started at 2026-03-25 22:39:37
+[TRAIN] DQN finished at 2026-03-26 01:08:52 | elapsed 149.2 min | OK
 
-[TRAIN] MC_REINFORCE (num_envs=64) started at 2026-03-25 21:53:39
-[TRAIN] MC_REINFORCE finished at 2026-03-25 21:56:51 | elapsed 3.2 min | OK
+[TRAIN] MC_REINFORCE (num_envs=16) started at 2026-03-26 01:08:52
+[TRAIN] MC_REINFORCE finished at 2026-03-26 01:22:07 | elapsed 13.3 min | OK
 
-[TRAIN] AC (num_envs=256) started at 2026-03-25 21:56:51
-[TRAIN] AC finished at 2026-03-25 21:57:57 | elapsed 1.1 min | OK
+[TRAIN] AC (num_envs=16) started at 2026-03-26 01:22:07
+[TRAIN] AC finished at 2026-03-26 01:27:30 | elapsed 5.4 min | OK
 
-[TRAIN] PPO (num_envs=256) started at 2026-03-25 21:57:57
-[TRAIN] PPO finished at 2026-03-25 22:10:55 | elapsed 13.0 min | OK
+[TRAIN] PPO (num_envs=256) started at 2026-03-26 01:27:30
+[TRAIN] PPO finished at 2026-03-26 01:40:30 | elapsed 13.0 min | OK
 
-[DEPLOY] Linear_Q started at 2026-03-25 22:10:55
-[DEPLOY] Linear_Q finished at 2026-03-25 22:11:04 | elapsed 9.1 sec | OK
+[DEPLOY] Linear_Q started at 2026-03-26 01:40:30
+[DEPLOY] Linear_Q finished at 2026-03-26 01:40:40 | elapsed 9.4 sec | OK
 
-[DEPLOY] DQN started at 2026-03-25 22:11:04
-[DEPLOY] DQN finished at 2026-03-25 22:11:12 | elapsed 7.9 sec | OK
+[DEPLOY] DQN started at 2026-03-26 01:40:40
+[DEPLOY] DQN finished at 2026-03-26 01:41:13 | elapsed 33.5 sec | OK
 
-[DEPLOY] MC_REINFORCE started at 2026-03-25 22:11:12
-[DEPLOY] MC_REINFORCE finished at 2026-03-25 22:11:20 | elapsed 7.8 sec | OK
+[DEPLOY] MC_REINFORCE started at 2026-03-26 01:41:13
+[DEPLOY] MC_REINFORCE finished at 2026-03-26 01:41:22 | elapsed 8.2 sec | OK
 
-[DEPLOY] AC started at 2026-03-25 22:11:20
-[DEPLOY] AC finished at 2026-03-25 22:11:28 | elapsed 7.8 sec | OK
+[DEPLOY] AC started at 2026-03-26 01:41:22
+[DEPLOY] AC finished at 2026-03-26 01:41:30 | elapsed 8.1 sec | OK
 
-[DEPLOY] PPO started at 2026-03-25 22:11:28
-[DEPLOY] PPO finished at 2026-03-25 22:12:28 | elapsed 60.2 sec | OK
+[DEPLOY] PPO started at 2026-03-26 01:41:30
+[DEPLOY] PPO finished at 2026-03-26 01:42:30 | elapsed 60.6 sec | OK
 
 ============================================================
-All done at 2026-03-25 22:12:34
+All done at 2026-03-26 01:42:36
 ============================================================
 
