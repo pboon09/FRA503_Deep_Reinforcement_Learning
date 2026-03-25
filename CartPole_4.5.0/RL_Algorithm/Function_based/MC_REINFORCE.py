@@ -94,11 +94,7 @@ class MC_REINFORCE(BaseAlgorithm):
         ep_rewards = torch.zeros(num_agents, device=self.device)
         ep_steps = torch.zeros(num_agents, dtype=torch.int, device=self.device)
 
-        # Convert n_episodes to a total step budget so training duration
-        # is independent of num_envs (like CleanRL/SpinningUp).
-        # Max episode = 1000 steps (10s / 0.01s per step).
-        total_timesteps = n_episodes * 1000
-        while global_step < total_timesteps:
+        while total_episodes < n_episodes:
             obs_buf = []
             actions_buf = []
             rewards_buf = []
