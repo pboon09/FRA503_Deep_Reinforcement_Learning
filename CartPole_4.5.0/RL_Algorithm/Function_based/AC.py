@@ -105,10 +105,13 @@ class AC(OnPolicyAlgorithm):
         sum_reward = 0.0
         last_log = 0
         global_step = 0
+        iteration = 0
         ep_rewards = torch.zeros(num_agents, device=self.device)
         ep_steps = torch.zeros(num_agents, dtype=torch.int, device=self.device)
 
-        while total_episodes < n_episodes:
+        # Use n_episodes as max iterations (gradient updates) so that
+        # training duration is independent of num_envs.
+        while iteration < n_episodes:
             obs_buf = []
             actions_buf = []
             rewards_buf = []
@@ -201,10 +204,12 @@ class AC(OnPolicyAlgorithm):
                 nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
                 self.optimizer.step()
 
+            iteration += 1
+
             if total_episodes - last_log >= 100 and total_episodes > 0:
                 n_new = total_episodes - last_log
                 avg = sum_reward / n_new
-                print(f"[AC] ep {total_episodes} | avg_return={avg:.2f} | loss={total_loss.item():.4f}")
+                print(f"[AC] iter {iteration} | ep {total_episodes} | avg_return={avg:.2f} | loss={total_loss.item():.4f}")
                 self.plot_durations(timestep=int(avg))
                 sum_reward = 0.0
                 last_log = total_episodes

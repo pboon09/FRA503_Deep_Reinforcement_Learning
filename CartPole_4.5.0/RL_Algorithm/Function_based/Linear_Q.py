@@ -44,8 +44,12 @@ class Linear_QN(BaseAlgorithm):
         targets = rewards + self.discount_factor * max_q_next * (1.0 - terminateds)
         q_current = np.array([states[i] @ self.w[:, actions[i]] for i in range(N)])
         deltas = np.clip(targets - q_current, -1.0, 1.0)  # clip TD error for stability
+        # Average gradient across all envs to prevent lr scaling with num_envs
+        grad = np.zeros_like(self.w)
         for i in range(N):
-            self.w[:, actions[i]] += self.lr * deltas[i] * states[i]
+            grad[:, actions[i]] += deltas[i] * states[i]
+        grad /= N
+        self.w += self.lr * grad
         # Decay learning rate
         self.lr = max(self.lr_min, self.lr * self.lr_decay)
 

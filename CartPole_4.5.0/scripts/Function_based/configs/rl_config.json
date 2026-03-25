@@ -18,14 +18,14 @@
             "num_of_action": 11,
             "hidden_dim": 128,
             "dropout": 0.0,
-            "learning_rate": 0.001,
-            "tau": 0.005,
+            "learning_rate": 0.0003,
+            "tau": 0.001,
             "initial_epsilon": 1.0,
-            "epsilon_decay": 0.00025,
-            "final_epsilon": 0.04,
-            "buffer_size": 100000,
-            "batch_size": 64,
-            "learning_starts": 2000
+            "epsilon_decay": 0.00005,
+            "final_epsilon": 0.05,
+            "buffer_size": 500000,
+            "batch_size": 128,
+            "learning_starts": 5000
         },
         "MC_REINFORCE": {
             "num_of_action": 1,
@@ -33,7 +33,7 @@
             "dropout": 0.0,
             "action_type": "continuous",
             "learning_rate": 0.0003,
-            "rollout_steps": 128,
+            "rollout_steps": 16,
             "entropy_coef": 0.01,
             "num_epochs": 1
         },
@@ -56,16 +56,16 @@
             "activation": "elu",
             "action_type": "continuous",
             "init_noise_std": 1.0,
-            "num_learning_epochs": 8,
+            "num_learning_epochs": 5,
             "num_mini_batches": 4,
             "num_transitions_per_env": 16,
             "clip_param": 0.2,
             "lam": 0.95,
-            "value_loss_coef": 2.0,
-            "entropy_coef": 0.0,
+            "value_loss_coef": 1.0,
+            "entropy_coef": 0.005,
             "learning_rate": 0.001,
             "max_grad_norm": 1.0,
-            "desired_kl": 0.008
+            "desired_kl": 0.01
         }
     }
 }

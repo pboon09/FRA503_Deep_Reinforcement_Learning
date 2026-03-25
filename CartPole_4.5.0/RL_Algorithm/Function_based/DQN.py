@@ -83,7 +83,9 @@ class DQN(OffPolicyAlgorithm):
         next_state_values = torch.zeros(state_batch.size(0), device=self.device)
         with torch.no_grad():
             if non_final_next_states.size(0) > 0:
-                next_state_values[non_final_mask] = self.target_net(non_final_next_states).max(dim=1).values
+                # Double DQN: policy net selects action, target net evaluates
+                best_actions = self.policy_net(non_final_next_states).argmax(dim=1, keepdim=True)
+                next_state_values[non_final_mask] = self.target_net(non_final_next_states).gather(1, best_actions).squeeze(1)
         expected = (reward_batch + self.discount_factor * next_state_values).unsqueeze(1)
         return F.smooth_l1_loss(state_action_values, expected)
 

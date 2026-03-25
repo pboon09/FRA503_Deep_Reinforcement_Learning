@@ -81,7 +81,6 @@ class MC_REINFORCE(BaseAlgorithm):
     def learn(self, env, num_agents: int = 1, n_episodes: int = 20000, rollout_steps: int = 512):
         self.policy_net.train()
         T = rollout_steps
-        update_every = T
 
         obs, _ = env.reset()
         state = obs['policy'].to(self.device)
@@ -91,10 +90,13 @@ class MC_REINFORCE(BaseAlgorithm):
         sum_reward = 0.0
         last_log = 0
         global_step = 0
+        iteration = 0
         ep_rewards = torch.zeros(num_agents, device=self.device)
         ep_steps = torch.zeros(num_agents, dtype=torch.int, device=self.device)
 
-        while total_episodes < n_episodes:
+        # Use n_episodes as max iterations (gradient updates) so that
+        # training duration is independent of num_envs.
+        while iteration < n_episodes:
             obs_buf = []
             actions_buf = []
             rewards_buf = []
@@ -174,6 +176,8 @@ class MC_REINFORCE(BaseAlgorithm):
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=0.5)
                 self.optimizer.step()
+
+            iteration += 1
 
             if total_episodes - last_log >= 100 and total_episodes > 0:
                 n_new = total_episodes - last_log
