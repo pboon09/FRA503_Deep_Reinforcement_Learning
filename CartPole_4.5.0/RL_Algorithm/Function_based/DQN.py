@@ -178,12 +178,15 @@ class DQN(OffPolicyAlgorithm):
                     episode_rewards[i] = 0.0
                     episode_steps[i] = 0
                     total_episodes += 1
-                    self.decay_epsilon()  # per episode, not per step
+
+            # Epsilon decay per step (SB3/CleanRL standard), not per episode
+            self.decay_epsilon()
 
             if global_step >= self.learning_starts:
-                for _ in range(4):  # multiple gradient steps per env step
-                    self.update_policy()
-                self.update_target_networks()
+                self.update_policy()  # 1 gradient step per env step (SB3/CleanRL standard)
+                # Hard target update every 1000 steps (SB3/CleanRL standard)
+                if (global_step // num_agents) % 1000 == 0:
+                    self.target_net.load_state_dict(self.policy_net.state_dict())
             state = next_state
 
             if total_episodes - last_log >= 100 and total_episodes > 0:

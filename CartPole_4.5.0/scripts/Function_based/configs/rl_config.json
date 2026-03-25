@@ -21,7 +21,7 @@
             "learning_rate": 0.0003,
             "tau": 0.001,
             "initial_epsilon": 1.0,
-            "epsilon_decay": 0.00005,
+            "epsilon_decay": 0.00025,
             "final_epsilon": 0.05,
             "buffer_size": 500000,
             "batch_size": 128,
@@ -33,7 +33,7 @@
             "dropout": 0.0,
             "action_type": "continuous",
             "learning_rate": 0.0003,
-            "rollout_steps": 16,
+            "rollout_steps": 128,
             "entropy_coef": 0.01,
             "num_epochs": 1
         },
@@ -47,7 +47,7 @@
             "value_loss_coef": 0.5,
             "entropy_coef": 0.01,
             "max_grad_norm": 0.5,
-            "rollout_steps": 16,
+            "rollout_steps": 64,
             "num_epochs": 1
         },
         "PPO": {
@@ -58,11 +58,11 @@
             "init_noise_std": 1.0,
             "num_learning_epochs": 5,
             "num_mini_batches": 4,
-            "num_transitions_per_env": 16,
+            "num_transitions_per_env": 24,
             "clip_param": 0.2,
             "lam": 0.95,
             "value_loss_coef": 1.0,
-            "entropy_coef": 0.005,
+            "entropy_coef": 0.01,
             "learning_rate": 0.001,
             "max_grad_norm": 1.0,
             "desired_kl": 0.01

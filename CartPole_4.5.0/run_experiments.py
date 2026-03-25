@@ -72,6 +72,11 @@ def main():
     if "ALL" in run:
         run = {"TRAIN", "DEPLOY", "PLOTS"}
 
+    # Clear timing log for fresh run
+    os.makedirs(os.path.dirname(TIMING_LOG), exist_ok=True)
+    with open(TIMING_LOG, "w") as f:
+        pass
+
     log_timing(f"{'='*60}")
     log_timing(f"Run started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     log_timing(f"Suites: {run}")

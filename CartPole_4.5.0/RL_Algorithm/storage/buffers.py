@@ -171,11 +171,6 @@ class RolloutBuffer:
         """
         batch_size       = self.num_envs * self.num_transitions_per_env
         mini_batch_size  = batch_size // num_mini_batches
-        indices          = torch.randperm(
-            num_mini_batches * mini_batch_size,
-            requires_grad=False,
-            device=self.device,
-        )
 
         # Flatten (T, N, ...) → (T*N, ...)
         observations         = self.observations.flatten(0, 1)
@@ -188,6 +183,12 @@ class RolloutBuffer:
         old_sigma            = self.sigma.flatten(0, 1)
 
         for _epoch in range(num_epochs):
+            # Re-shuffle indices each epoch (rsl_rl standard)
+            indices = torch.randperm(
+                num_mini_batches * mini_batch_size,
+                requires_grad=False,
+                device=self.device,
+            )
             for i in range(num_mini_batches):
                 start     = i * mini_batch_size
                 stop      = (i + 1) * mini_batch_size

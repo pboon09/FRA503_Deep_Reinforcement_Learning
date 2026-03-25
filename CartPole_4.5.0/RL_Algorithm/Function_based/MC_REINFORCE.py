@@ -94,9 +94,11 @@ class MC_REINFORCE(BaseAlgorithm):
         ep_rewards = torch.zeros(num_agents, device=self.device)
         ep_steps = torch.zeros(num_agents, dtype=torch.int, device=self.device)
 
-        # Use n_episodes as max iterations (gradient updates) so that
-        # training duration is independent of num_envs.
-        while iteration < n_episodes:
+        # With many parallel envs, n_episodes is reached very fast (few iterations).
+        # Ensure at least 1000 gradient updates for convergence, then stop
+        # once n_episodes have completed.
+        min_updates = 1000
+        while total_episodes < n_episodes or iteration < min_updates:
             obs_buf = []
             actions_buf = []
             rewards_buf = []

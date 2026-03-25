@@ -22,7 +22,7 @@ class ActorCritic(nn.Module):
         self.actor.init_weights(scales=1.0)
         self.critic.init_weights(scales=1.0)
         if self.action_type == "continuous":
-            self.std = nn.Parameter(init_noise_std * torch.ones(action_dim))
+            self.log_std = nn.Parameter(torch.log(init_noise_std * torch.ones(action_dim)))
         self.distribution = None
 
     @property
@@ -31,7 +31,7 @@ class ActorCritic(nn.Module):
 
     @property
     def action_std(self):
-        return self.distribution.stddev if self.action_type == "continuous" else torch.ones_like(self.distribution.probs)
+        return self.log_std.exp() if self.action_type == "continuous" else torch.ones_like(self.distribution.probs)
 
     @property
     def entropy(self):
@@ -46,7 +46,7 @@ class ActorCritic(nn.Module):
     def _update_distribution(self, obs):
         if self.action_type == "continuous":
             mean = self.actor(obs)
-            self.distribution = Normal(mean, self.std.expand_as(mean))
+            self.distribution = Normal(mean, self.log_std.exp().expand_as(mean))
         else:
             self.distribution = Categorical(logits=self.actor(obs))
 
@@ -109,9 +109,11 @@ class AC(OnPolicyAlgorithm):
         ep_rewards = torch.zeros(num_agents, device=self.device)
         ep_steps = torch.zeros(num_agents, dtype=torch.int, device=self.device)
 
-        # Use n_episodes as max iterations (gradient updates) so that
-        # training duration is independent of num_envs.
-        while iteration < n_episodes:
+        # With many parallel envs, n_episodes is reached very fast (few iterations).
+        # Ensure at least 1000 gradient updates for convergence, then stop
+        # once n_episodes have completed.
+        min_updates = 1000
+        while total_episodes < n_episodes or iteration < min_updates:
             obs_buf = []
             actions_buf = []
             rewards_buf = []
