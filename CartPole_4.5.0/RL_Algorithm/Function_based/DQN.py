@@ -159,11 +159,11 @@ class DQN(OffPolicyAlgorithm):
             global_step += num_agents
 
             for i in range(num_agents):
-                done_i = bool(done_flags[i].item())
-                next_store = None if done_i else next_state[i:i+1].cpu()
+                term_i = bool(terminated[i].item())
+                next_store = None if term_i else next_state[i:i+1].cpu()
                 self.store_transition(
                     state[i:i+1].cpu(), action_indices[i].item(),
-                    reward[i].item(), next_store, done_i,
+                    reward[i].item(), next_store, term_i,
                 )
                 if done_flags[i].item():
                     self.episode_log.append({
@@ -186,9 +186,7 @@ class DQN(OffPolicyAlgorithm):
             if global_step >= self.learning_starts:
                 for _ in range(4):
                     self.update_policy()
-                # Hard target update every 10,000 transitions (SB3 default)
-                if global_step % 10000 < num_agents:
-                    self.target_net.load_state_dict(self.policy_net.state_dict())
+                self.update_target_networks()
             state = next_state
 
             if total_episodes - last_log >= 100 and total_episodes > 0:

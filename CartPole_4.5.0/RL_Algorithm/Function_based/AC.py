@@ -22,7 +22,7 @@ class ActorCritic(nn.Module):
         self.actor.init_weights(scales=1.0)
         self.critic.init_weights(scales=1.0)
         if self.action_type == "continuous":
-            self.log_std = nn.Parameter(torch.log(init_noise_std * torch.ones(action_dim)))
+            self.std = nn.Parameter(init_noise_std * torch.ones(action_dim))
         self.distribution = None
 
     @property
@@ -31,7 +31,7 @@ class ActorCritic(nn.Module):
 
     @property
     def action_std(self):
-        return self.log_std.exp() if self.action_type == "continuous" else torch.ones_like(self.distribution.probs)
+        return self.distribution.stddev if self.action_type == "continuous" else torch.ones_like(self.distribution.probs)
 
     @property
     def entropy(self):
@@ -46,7 +46,7 @@ class ActorCritic(nn.Module):
     def _update_distribution(self, obs):
         if self.action_type == "continuous":
             mean = self.actor(obs)
-            self.distribution = Normal(mean, self.log_std.exp().expand_as(mean))
+            self.distribution = Normal(mean, self.std.expand_as(mean))
         else:
             self.distribution = Categorical(logits=self.actor(obs))
 
@@ -105,7 +105,6 @@ class AC(OnPolicyAlgorithm):
         sum_reward = 0.0
         last_log = 0
         global_step = 0
-        iteration = 0
         ep_rewards = torch.zeros(num_agents, device=self.device)
         ep_steps = torch.zeros(num_agents, dtype=torch.int, device=self.device)
 
@@ -123,11 +122,12 @@ class AC(OnPolicyAlgorithm):
                     action = self.policy.distribution.sample()
                     if self.action_type == "discrete":
                         action = action.unsqueeze(-1)
+                    actions_buf.append(action)
+
                     if self.action_type == "continuous":
                         env_action = torch.clamp(action, self.action_range[0], self.action_range[1])
                     else:
                         env_action = action.float()
-                    actions_buf.append(env_action)
 
                     next_obs, reward, terminated, truncated, _ = env.step(env_action)
                     done = (terminated | truncated).float().to(self.device)
@@ -187,9 +187,11 @@ class AC(OnPolicyAlgorithm):
                 values = torch.stack(all_values)          # (T, N)
                 entropy = torch.stack(all_entropy).mean()
 
-                # Normalize advantage GLOBALLY (all envs + timesteps)
+                # Normalize advantage PER-ENV (dim=0)
                 advantage = (returns.detach() - values.detach())
-                advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
+                adv_mean = advantage.mean(dim=0, keepdim=True)
+                adv_std = advantage.std(dim=0, keepdim=True)
+                advantage = (advantage - adv_mean) / (adv_std + 1e-8)
 
                 actor_loss = -(log_probs * advantage).mean()
                 critic_loss = (values - returns.detach()).pow(2).mean()
@@ -201,12 +203,10 @@ class AC(OnPolicyAlgorithm):
                 nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
                 self.optimizer.step()
 
-            iteration += 1
-
             if total_episodes - last_log >= 100 and total_episodes > 0:
                 n_new = total_episodes - last_log
                 avg = sum_reward / n_new
-                print(f"[AC] iter {iteration} | ep {total_episodes} | avg_return={avg:.2f} | loss={total_loss.item():.4f}")
+                print(f"[AC] ep {total_episodes} | avg_return={avg:.2f} | loss={total_loss.item():.4f}")
                 self.plot_durations(timestep=int(avg))
                 sum_reward = 0.0
                 last_log = total_episodes

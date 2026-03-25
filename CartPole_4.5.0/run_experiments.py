@@ -13,7 +13,7 @@ TIMING_LOG = os.path.join(ROOT, "experiments", "timing_log.txt")
 
 TASK = "Stabilize-Isaac-Cartpole-v0"
 ALL_ALGOS = ["Linear_Q", "DQN", "MC_REINFORCE", "AC", "PPO"]
-ALGO_ENVS = {"PPO": 256, "AC": 16, "MC_REINFORCE": 16, "DQN": 32, "Linear_Q": 32}
+ALGO_ENVS = {"PPO": 256, "AC": 8, "MC_REINFORCE": 8, "DQN": 32, "Linear_Q": 32}
 
 
 def log_timing(msg):

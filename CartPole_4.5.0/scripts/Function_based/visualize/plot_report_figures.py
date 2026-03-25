@@ -14,6 +14,7 @@ Data:
 """
 
 import argparse
+import json
 import os
 import numpy as np
 import pandas as pd
@@ -367,35 +368,50 @@ def make_fig9(out):
     ac_algos = {"AC": "AC", "PPO": "PPO"}
     model_dir = os.path.join(ROOT, "model", "Stabilize")
 
+    # Read config to get correct model sizes
+    cfg_path = os.path.join(ROOT, "scripts", "Function_based", "configs", "rl_config.json")
+    with open(cfg_path) as _f:
+        _cfg = json.load(_f)
+    _shared = _cfg["shared"]
+
     loaded = {}
     for algo, label in ac_algos.items():
         model_path = os.path.join(model_dir, algo, f"{algo}_final.pth")
         if not os.path.isfile(model_path):
             continue
         try:
+            _ac = _cfg["algorithms"].get(algo, {})
             if algo == "PPO":
                 from RL_Algorithm.Function_based.PPO import PPO
                 agent = PPO(
-                    device=torch.device("cpu"), num_of_action=1,
-                    action_range=[-2.5, 2.5], n_observations=4,
-                    hidden_dims=[64, 64], activation="elu",
-                    action_type="continuous", init_noise_std=1.0,
-                    num_learning_epochs=5, num_mini_batches=4,
-                    clip_param=0.2, gamma=0.99, lam=0.95,
-                    value_loss_coef=0.5, entropy_coef=0.01,
-                    learning_rate=0.0003, max_grad_norm=0.5, desired_kl=0.0,
+                    device=torch.device("cpu"), num_of_action=_ac.get("num_of_action", 1),
+                    action_range=_shared["action_range"], n_observations=_shared["n_observations"],
+                    hidden_dims=_ac["hidden_dims"], activation=_ac.get("activation", "elu"),
+                    action_type=_ac.get("action_type", "continuous"),
+                    init_noise_std=_ac.get("init_noise_std", 1.0),
+                    num_learning_epochs=_ac["num_learning_epochs"],
+                    num_mini_batches=_ac["num_mini_batches"],
+                    clip_param=_ac["clip_param"], gamma=_shared["discount_factor"],
+                    lam=_ac["lam"], value_loss_coef=_ac.get("value_loss_coef", 1.0),
+                    entropy_coef=_ac.get("entropy_coef", 0.01),
+                    learning_rate=_ac["learning_rate"],
+                    max_grad_norm=_ac.get("max_grad_norm", 1.0),
+                    desired_kl=_ac.get("desired_kl", 0.0),
                 )
                 agent.load_model(os.path.join(model_dir, algo), f"{algo}_final.pth")
                 loaded[label] = agent.policy
             elif algo == "AC":
                 from RL_Algorithm.Function_based.AC import AC
                 agent = AC(
-                    device=torch.device("cpu"), num_of_action=1,
-                    action_range=[-2.5, 2.5], n_observations=4,
-                    hidden_dims=[64, 64], activation="elu",
-                    action_type="continuous", init_noise_std=0.6,
-                    learning_rate=0.0007, discount_factor=0.99,
-                    value_loss_coef=0.5, entropy_coef=0.01, max_grad_norm=0.5,
+                    device=torch.device("cpu"), num_of_action=_ac.get("num_of_action", 1),
+                    action_range=_shared["action_range"], n_observations=_shared["n_observations"],
+                    hidden_dims=_ac["hidden_dims"], activation=_ac.get("activation", "elu"),
+                    action_type=_ac.get("action_type", "continuous"),
+                    init_noise_std=_ac.get("init_noise_std", 1.0),
+                    learning_rate=_ac["learning_rate"], discount_factor=_shared["discount_factor"],
+                    value_loss_coef=_ac.get("value_loss_coef", 0.5),
+                    entropy_coef=_ac.get("entropy_coef", 0.01),
+                    max_grad_norm=_ac.get("max_grad_norm", 0.5),
                 )
                 agent.load_model(os.path.join(model_dir, algo), f"{algo}_final.pth")
                 loaded[label] = agent.policy
@@ -407,12 +423,14 @@ def make_fig9(out):
     rf_path = os.path.join(model_dir, "MC_REINFORCE", "MC_REINFORCE_final.pth")
     if os.path.isfile(rf_path):
         try:
+            _mc = _cfg["algorithms"]["MC_REINFORCE"]
             from RL_Algorithm.Function_based.MC_REINFORCE import MC_REINFORCE
             agent = MC_REINFORCE(
-                device=torch.device("cpu"), num_of_action=1,
-                action_range=[-2.5, 2.5], n_observations=4,
-                hidden_dim=64, dropout=0.0, action_type="continuous",
-                learning_rate=0.001, discount_factor=0.99,
+                device=torch.device("cpu"), num_of_action=_mc.get("num_of_action", 1),
+                action_range=_shared["action_range"], n_observations=_shared["n_observations"],
+                hidden_dim=_mc["hidden_dim"], dropout=_mc.get("dropout", 0.0),
+                action_type=_mc.get("action_type", "continuous"),
+                learning_rate=_mc["learning_rate"], discount_factor=_shared["discount_factor"],
             )
             agent.load_model(os.path.join(model_dir, "MC_REINFORCE"), "MC_REINFORCE_final.pth")
             reinforce_net = agent.policy_net
@@ -424,14 +442,16 @@ def make_fig9(out):
     dqn_path = os.path.join(model_dir, "DQN", "DQN_final.pth")
     if os.path.isfile(dqn_path):
         try:
+            _dqn = _cfg["algorithms"]["DQN"]
             from RL_Algorithm.Function_based.DQN import DQN
             agent = DQN(
-                device=torch.device("cpu"), num_of_action=21,
-                action_range=[-2.5, 2.5], n_observations=4,
-                hidden_dim=256, dropout=0.0, learning_rate=0.001,
-                tau=0.005, initial_epsilon=0.0, epsilon_decay=0.0,
-                final_epsilon=0.0, discount_factor=0.99,
-                buffer_size=1000, batch_size=64,
+                device=torch.device("cpu"), num_of_action=_dqn["num_of_action"],
+                action_range=_shared["action_range"], n_observations=_shared["n_observations"],
+                hidden_dim=_dqn["hidden_dim"], dropout=_dqn.get("dropout", 0.0),
+                learning_rate=_dqn["learning_rate"], tau=_dqn["tau"],
+                initial_epsilon=0.0, epsilon_decay=0.0, final_epsilon=0.0,
+                discount_factor=_shared["discount_factor"],
+                buffer_size=1000, batch_size=_dqn["batch_size"],
             )
             agent.load_model(os.path.join(model_dir, "DQN"), "DQN_final.pth")
             dqn_model = agent.policy_net

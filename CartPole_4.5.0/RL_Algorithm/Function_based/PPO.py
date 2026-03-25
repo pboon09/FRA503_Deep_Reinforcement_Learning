@@ -184,7 +184,9 @@ class PPO(OnPolicyAlgorithm):
             self.storage.returns[step]    = advantage + self.storage.values[step]
             self.storage.advantages[step] = advantage
 
-        # Advantages are normalized per mini-batch in update() (rsl_rl standard)
+        # Normalize advantages
+        adv = self.storage.advantages
+        self.storage.advantages = (adv - adv.mean()) / (adv.std() + 1e-8)
         # ====================================== #
 
     # ------------------------------------------------------------------ #
@@ -223,14 +225,15 @@ class PPO(OnPolicyAlgorithm):
             value_batch = self.policy.evaluate(obs_batch)
             entropy_batch = self.policy.entropy
 
-            # Per-mini-batch advantage normalization (rsl_rl standard)
-            advantages_batch = (advantages_batch - advantages_batch.mean()) / (advantages_batch.std() + 1e-8)
+            # Per-mini-batch advantage normalization
+            if self.normalize_advantage_per_mini_batch:
+                advantages_batch = (advantages_batch - advantages_batch.mean()) / (advantages_batch.std() + 1e-8)
 
             # KL-adaptive learning rate (continuous only)
             if self.desired_kl is not None and self.desired_kl > 0:
                 with torch.inference_mode():
                     kl = torch.sum(
-                        torch.log(self.policy.action_std / old_sigma_batch + 1e-5)
+                        torch.log(old_sigma_batch / self.policy.action_std + 1e-5)
                         + (old_sigma_batch**2 + (old_mu_batch - self.policy.action_mean)**2)
                         / (2.0 * self.policy.action_std**2 + 1e-5)
                         - 0.5,
