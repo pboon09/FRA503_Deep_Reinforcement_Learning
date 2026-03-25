@@ -179,8 +179,9 @@ class DQN(OffPolicyAlgorithm):
                     episode_steps[i] = 0
                     total_episodes += 1
 
-            # Epsilon decay per step (SB3/CleanRL standard), not per episode
-            self.decay_epsilon()
+            # Epsilon decay per transition (not per vector step)
+            for _ in range(num_agents):
+                self.decay_epsilon()
 
             if global_step >= self.learning_starts:
                 # Keep the update/data ratio roughly stable as num_envs changes.

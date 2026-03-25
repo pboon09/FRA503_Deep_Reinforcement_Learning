@@ -11,8 +11,8 @@
             "learning_rate": 0.1,
             "lr_decay": 0.9999,
             "initial_epsilon": 1.0,
-            "epsilon_decay": 0.0002,
-            "final_epsilon": 0.01
+            "epsilon_decay": 0.0000095,
+            "final_epsilon": 0.05
         },
         "DQN": {
             "num_of_action": 11,
@@ -21,8 +21,8 @@
             "learning_rate": 0.0003,
             "tau": 0.001,
             "initial_epsilon": 1.0,
-            "epsilon_decay": 0.00025,
-            "final_epsilon": 0.05,
+            "epsilon_decay": 0.0000048,
+            "final_epsilon": 0.04,
             "buffer_size": 500000,
             "batch_size": 128,
             "learning_starts": 5000

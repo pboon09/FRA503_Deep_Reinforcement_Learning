@@ -109,11 +109,11 @@ class AC(OnPolicyAlgorithm):
         ep_rewards = torch.zeros(num_agents, device=self.device)
         ep_steps = torch.zeros(num_agents, dtype=torch.int, device=self.device)
 
-        # With many parallel envs, n_episodes is reached very fast (few iterations).
-        # Ensure at least 1000 gradient updates for convergence, then stop
-        # once n_episodes have completed.
-        min_updates = 1000
-        while total_episodes < n_episodes or iteration < min_updates:
+        # Convert n_episodes to a total step budget so training duration
+        # is independent of num_envs (like CleanRL/SpinningUp).
+        # Max episode = 1000 steps (10s / 0.01s per step).
+        total_timesteps = n_episodes * 1000
+        while global_step < total_timesteps:
             obs_buf = []
             actions_buf = []
             rewards_buf = []
