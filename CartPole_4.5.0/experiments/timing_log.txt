@@ -95,3 +95,43 @@ Algo envs: {'PPO': 256, 'AC': 256, 'MC_REINFORCE': 64, 'DQN': 32, 'Linear_Q': 32
 All done at 2026-03-25 09:43:43
 ============================================================
 
+============================================================
+Run started at 2026-03-25 17:46:22
+Suites: {'TRAIN', 'PLOTS', 'DEPLOY'}
+Algo envs: {'PPO': 256, 'AC': 256, 'MC_REINFORCE': 256, 'DQN': 256, 'Linear_Q': 256}
+============================================================
+
+[TRAIN] Linear_Q (num_envs=256) started at 2026-03-25 17:46:22
+[TRAIN] Linear_Q finished at 2026-03-25 17:47:03 | elapsed 0.7 min | OK
+
+[TRAIN] DQN (num_envs=256) started at 2026-03-25 17:47:03
+[TRAIN] DQN finished at 2026-03-25 17:55:45 | elapsed 8.7 min | OK
+
+[TRAIN] MC_REINFORCE (num_envs=256) started at 2026-03-25 17:55:45
+[TRAIN] MC_REINFORCE finished at 2026-03-25 17:56:55 | elapsed 1.2 min | OK
+
+[TRAIN] AC (num_envs=256) started at 2026-03-25 17:56:55
+[TRAIN] AC finished at 2026-03-25 17:58:01 | elapsed 1.1 min | OK
+
+[TRAIN] PPO (num_envs=256) started at 2026-03-25 17:58:01
+[TRAIN] PPO finished at 2026-03-25 18:14:39 | elapsed 16.6 min | OK
+
+[DEPLOY] Linear_Q started at 2026-03-25 18:14:39
+[DEPLOY] Linear_Q finished at 2026-03-25 18:14:48 | elapsed 9.0 sec | OK
+
+[DEPLOY] DQN started at 2026-03-25 18:14:48
+[DEPLOY] DQN finished at 2026-03-25 18:15:06 | elapsed 18.0 sec | OK
+
+[DEPLOY] MC_REINFORCE started at 2026-03-25 18:15:06
+[DEPLOY] MC_REINFORCE finished at 2026-03-25 18:15:16 | elapsed 10.0 sec | OK
+
+[DEPLOY] AC started at 2026-03-25 18:15:16
+[DEPLOY] AC finished at 2026-03-25 18:15:25 | elapsed 8.6 sec | OK
+
+[DEPLOY] PPO started at 2026-03-25 18:15:25
+[DEPLOY] PPO finished at 2026-03-25 18:16:25 | elapsed 60.1 sec | OK
+
+============================================================
+All done at 2026-03-25 18:16:32
+============================================================
+
