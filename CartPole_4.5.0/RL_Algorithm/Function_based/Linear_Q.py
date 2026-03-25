@@ -29,7 +29,7 @@ class Linear_QN(BaseAlgorithm):
         self.lr_decay = lr_decay
         self.lr_min = 0.001
         self.w = np.zeros((4, num_of_action))
-        self.obs_scale = np.array([2.4, 3.0, 0.21, 3.0], dtype=np.float64)
+        self.obs_scale = np.array([3.0, 0.419, 5.0, 5.0], dtype=np.float64)
 
     def q(self, obs, a=None):
         obs = np.asarray(obs, dtype=np.float64).reshape(-1, 4)
