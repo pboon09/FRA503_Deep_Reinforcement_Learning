@@ -149,10 +149,8 @@ class MC_REINFORCE(BaseAlgorithm):
                 G = rewards[t] + self.discount_factor * G * (1.0 - dones[t])
                 returns[t] = G
 
-            # Normalize PER-ENV (dim=0), not globally
-            mean = returns.mean(dim=0, keepdim=True)
-            std = returns.std(dim=0, keepdim=True)
-            returns = (returns - mean) / (std + 1e-8)
+            # Normalize GLOBALLY (all envs + timesteps)
+            returns = (returns - returns.mean()) / (returns.std() + 1e-8)
 
             # Multi-epoch update (like PPO but without clipping)
             for _ in range(self.num_epochs):

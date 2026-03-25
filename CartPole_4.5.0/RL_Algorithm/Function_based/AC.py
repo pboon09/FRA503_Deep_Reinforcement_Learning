@@ -187,11 +187,9 @@ class AC(OnPolicyAlgorithm):
                 values = torch.stack(all_values)          # (T, N)
                 entropy = torch.stack(all_entropy).mean()
 
-                # Normalize advantage PER-ENV (dim=0)
+                # Normalize advantage GLOBALLY (all envs + timesteps)
                 advantage = (returns.detach() - values.detach())
-                adv_mean = advantage.mean(dim=0, keepdim=True)
-                adv_std = advantage.std(dim=0, keepdim=True)
-                advantage = (advantage - adv_mean) / (adv_std + 1e-8)
+                advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
 
                 actor_loss = -(log_probs * advantage).mean()
                 critic_loss = (values - returns.detach()).pow(2).mean()
