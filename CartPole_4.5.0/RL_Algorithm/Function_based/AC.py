@@ -127,12 +127,11 @@ class AC(OnPolicyAlgorithm):
                     action = self.policy.distribution.sample()
                     if self.action_type == "discrete":
                         action = action.unsqueeze(-1)
-                    actions_buf.append(action)
-
                     if self.action_type == "continuous":
                         env_action = torch.clamp(action, self.action_range[0], self.action_range[1])
                     else:
                         env_action = action.float()
+                    actions_buf.append(env_action)
 
                     next_obs, reward, terminated, truncated, _ = env.step(env_action)
                     done = (terminated | truncated).float().to(self.device)

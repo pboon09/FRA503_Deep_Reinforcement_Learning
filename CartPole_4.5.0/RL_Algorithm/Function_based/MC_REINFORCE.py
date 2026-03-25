@@ -108,13 +108,13 @@ class MC_REINFORCE(BaseAlgorithm):
                 for _ in range(T):
                     obs_buf.append(state.clone())
                     dist = self._get_distribution(state)
-                    action, log_prob = self._sample_action(dist)
-                    actions_buf.append(action)
+                    action, _ = self._sample_action(dist)
 
                     if self.action_type == "continuous":
                         env_action = torch.clamp(action, self.action_range[0], self.action_range[1])
                     else:
                         env_action = action.float()
+                    actions_buf.append(env_action)
 
                     next_obs, reward, terminated, truncated, _ = env.step(env_action)
                     done = (terminated | truncated).float().to(self.device)

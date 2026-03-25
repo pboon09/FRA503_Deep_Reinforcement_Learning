@@ -159,11 +159,11 @@ class DQN(OffPolicyAlgorithm):
             global_step += num_agents
 
             for i in range(num_agents):
-                term_i = bool(terminated[i].item())
-                next_store = None if term_i else next_state[i:i+1].cpu()
+                done_i = bool(done_flags[i].item())
+                next_store = None if done_i else next_state[i:i+1].cpu()
                 self.store_transition(
                     state[i:i+1].cpu(), action_indices[i].item(),
-                    reward[i].item(), next_store, term_i,
+                    reward[i].item(), next_store, done_i,
                 )
                 if done_flags[i].item():
                     self.episode_log.append({
@@ -183,9 +183,12 @@ class DQN(OffPolicyAlgorithm):
             self.decay_epsilon()
 
             if global_step >= self.learning_starts:
-                self.update_policy()  # 1 gradient step per env step (SB3/CleanRL standard)
-                # Hard target update every 1000 steps (SB3/CleanRL standard)
-                if (global_step // num_agents) % 1000 == 0:
+                # Keep the update/data ratio roughly stable as num_envs changes.
+                updates_per_vector_step = max(1, num_agents // 32)
+                for _ in range(updates_per_vector_step):
+                    self.update_policy()
+                # Sync by collected transitions, not vector steps.
+                if global_step % 1000 < num_agents:
                     self.target_net.load_state_dict(self.policy_net.state_dict())
             state = next_state
 

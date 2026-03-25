@@ -205,12 +205,16 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                     elif Algorithm_name in ("MC_REINFORCE",):
                         agent.policy_net.eval()
                         if agent.action_type == "continuous":
-                            action = agent.policy_net(state)
+                            action = torch.clamp(
+                                agent.policy_net(state), shared["action_range"][0], shared["action_range"][1]
+                            )
                         else:
                             logits = agent.policy_net(state)
                             action = agent.scale_action(logits.argmax(dim=-1).item())
                     elif Algorithm_name in ("AC", "PPO"):
                         action = agent.select_action(state)
+                        if algo_cfg.get("action_type", "continuous") == "continuous":
+                            action = torch.clamp(action, shared["action_range"][0], shared["action_range"][1])
                     else:
                         break
 
