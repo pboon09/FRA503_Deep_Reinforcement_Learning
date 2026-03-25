@@ -184,12 +184,10 @@ class DQN(OffPolicyAlgorithm):
                 self.decay_epsilon()
 
             if global_step >= self.learning_starts:
-                # Keep the update/data ratio roughly stable as num_envs changes.
-                updates_per_vector_step = max(1, num_agents // 32)
-                for _ in range(updates_per_vector_step):
+                for _ in range(4):
                     self.update_policy()
-                # Sync by collected transitions, not vector steps.
-                if global_step % 1000 < num_agents:
+                # Hard target update every 10,000 transitions (SB3 default)
+                if global_step % 10000 < num_agents:
                     self.target_net.load_state_dict(self.policy_net.state_dict())
             state = next_state
 

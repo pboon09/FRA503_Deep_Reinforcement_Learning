@@ -35,7 +35,7 @@
             "learning_rate": 0.0003,
             "rollout_steps": 128,
             "entropy_coef": 0.01,
-            "num_epochs": 8
+            "num_epochs": 1
         },
         "AC": {
             "num_of_action": 1,
@@ -48,7 +48,7 @@
             "entropy_coef": 0.01,
             "max_grad_norm": 0.5,
             "rollout_steps": 64,
-            "num_epochs": 4
+            "num_epochs": 1
         },
         "PPO": {
             "num_of_action": 1,
