@@ -154,15 +154,39 @@ class MC_REINFORCE(BaseAlgorithm):
             rewards = torch.stack(rewards_buf)          # (T, N)
             dones = torch.stack(dones_buf)              # (T, N)
 
-            # Compute MC returns -- bootstrap incomplete episodes from V(s_T)
-            with torch.no_grad():
-                G = self.value_net(state).squeeze(-1)  # V(s_T) for incomplete episodes
+            # # Compute MC returns -- bootstrap incomplete episodes from V(s_T)
+            # with torch.no_grad():
+            #     G = self.value_net(state).squeeze(-1)  # V(s_T) for incomplete episodes
+            # returns = torch.zeros(T, num_agents, device=self.device)
+            # for t in reversed(range(T)):
+            #     G = rewards[t] + self.discount_factor * G * (1.0 - dones[t])
+            #     returns[t] = G
+
+            # Pure MC returns -- only use completed episodes, no bootstrapping
             returns = torch.zeros(T, num_agents, device=self.device)
+            G = torch.zeros(num_agents, device=self.device)
+            # Build a mask of timesteps that belong to completed episodes
+            complete_mask = torch.zeros(T, num_agents, dtype=torch.bool, device=self.device)
+            # Track which envs have at least one done in this rollout
+            has_done = torch.zeros(num_agents, dtype=torch.bool, device=self.device)
+            for t in range(T):
+                if dones[t].sum() > 0:
+                    has_done |= (dones[t] > 0.5)
+            # Backward pass: accumulate returns, mark complete episode steps
+            ep_complete = torch.zeros(num_agents, dtype=torch.bool, device=self.device)
             for t in reversed(range(T)):
+                # At episode boundary, mark that everything from here backward (until previous done) is complete
+                ep_complete = ep_complete | (dones[t] > 0.5)
                 G = rewards[t] + self.discount_factor * G * (1.0 - dones[t])
                 returns[t] = G
+                complete_mask[t] = ep_complete
 
-            # Multi-epoch update with value baseline
+            # If no episodes completed in this rollout, skip the update
+            if not complete_mask.any():
+                iteration += 1
+                continue
+
+            # Multi-epoch update with value baseline (only on completed episode data)
             for _ in range(self.num_epochs):
                 # Re-evaluate log_probs, entropy, and values with current networks
                 all_log_probs = []
@@ -183,11 +207,16 @@ class MC_REINFORCE(BaseAlgorithm):
                 values = torch.stack(all_values)          # (T, N)
 
                 # Advantage = MC return - value baseline (variance reduction)
-                advantage = returns.detach() - values.detach()
+                # Only use completed episode transitions
+                masked_returns = returns[complete_mask].detach()
+                masked_values = values[complete_mask]
+                masked_log_probs = log_probs[complete_mask]
+
+                advantage = masked_returns - masked_values.detach()
                 advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
 
-                policy_loss = -(advantage * log_probs).mean() - self.entropy_coef * entropy
-                value_loss = (values - returns.detach()).pow(2).mean()
+                policy_loss = -(advantage * masked_log_probs).mean() - self.entropy_coef * entropy
+                value_loss = (masked_values - masked_returns).pow(2).mean()
                 loss = policy_loss + self.value_loss_coef * value_loss
 
                 self.optimizer.zero_grad()
