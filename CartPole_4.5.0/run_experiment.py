@@ -373,9 +373,9 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes,
             env_rewards = [[] for _ in range(num_envs)]
             if algo_name == "AC":
                 env_values = [[] for _ in range(num_envs)]
-            total_loss = 0.0
             num_updates = 0
             update_every = 50  # gradient step every N completed episodes
+            agent.optimizer.zero_grad()  # start with clean gradients
 
         pbar = tqdm(total=n_episodes, desc=f"Training {algo_name}", ncols=100)
 
@@ -427,18 +427,15 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes,
                     if done_cpu[i] and len(env_rewards[i]) > 1:
                         returns = agent.calculate_stepwise_returns(env_rewards[i])
                         lp = torch.stack(env_log_probs[i])
-                        loss = agent.calculate_loss(returns, lp)
-                        total_loss += loss
+                        loss = agent.calculate_loss(returns, lp) / update_every
+                        loss.backward()  # accumulate gradients immediately
                         num_updates += 1
                     if done_cpu[i]:
                         env_log_probs[i] = []
                         env_rewards[i] = []
                 if num_updates >= update_every:
-                    avg_loss = total_loss / num_updates
-                    agent.optimizer.zero_grad()
-                    avg_loss.backward()
                     agent.optimizer.step()
-                    total_loss = 0.0
+                    agent.optimizer.zero_grad()
                     num_updates = 0
 
             elif algo_name == "AC":
@@ -454,20 +451,17 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes,
                         lp = torch.stack(env_log_probs[i])
                         vals = torch.stack(env_values[i])
                         al, cl = agent.calculate_loss(lp, vals, returns)
-                        loss = al + agent.value_loss_coef * cl
-                        total_loss += loss
+                        loss = (al + agent.value_loss_coef * cl) / update_every
+                        loss.backward()  # accumulate gradients immediately
                         num_updates += 1
                     if done_cpu[i]:
                         env_log_probs[i] = []
                         env_values[i] = []
                         env_rewards[i] = []
                 if num_updates >= update_every:
-                    avg_loss = total_loss / num_updates
-                    agent.optimizer.zero_grad()
-                    avg_loss.backward()
                     torch.nn.utils.clip_grad_norm_(agent.policy.parameters(), agent.max_grad_norm)
                     agent.optimizer.step()
-                    total_loss = 0.0
+                    agent.optimizer.zero_grad()
                     num_updates = 0
 
             elif algo_name in ("SAC", "TD3"):
@@ -507,12 +501,10 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes,
 
         pbar.close()
 
-        # Final gradient step for MC algorithms
+        # Final gradient step for MC algorithms (flush accumulated grads)
         if algo_name in ("MC_REINFORCE", "AC") and num_updates > 0:
-            avg_loss = total_loss / num_updates
-            agent.optimizer.zero_grad()
-            avg_loss.backward()
             agent.optimizer.step()
+            agent.optimizer.zero_grad()
 
         # Sync Linear_Q GPU weights back to numpy
         if algo_name == "Linear_Q":
