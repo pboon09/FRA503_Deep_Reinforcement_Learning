@@ -2,3 +2,10 @@
 /.vscode
 /__pycache__
 *.tex
+
+# Model weights (too large for git)
+CartPole_4.5.0/model/
+**/model/
+
+# Keep experiments CSV and figures
+# (don't ignore experiments/ and figures/)
