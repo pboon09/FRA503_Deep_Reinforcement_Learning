@@ -15,7 +15,7 @@
             "initial_epsilon": 1.0,
             "epsilon_decay": 2e-4,
             "final_epsilon": 0.01,
-            "max_steps": 1000
+            "max_steps": 200
         },
         "DQN": {
             "num_of_action": 11,

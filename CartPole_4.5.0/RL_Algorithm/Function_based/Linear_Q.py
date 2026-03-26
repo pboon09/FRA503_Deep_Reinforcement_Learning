@@ -94,6 +94,7 @@ class Linear_QN(BaseAlgorithm):
         # ========= put your code here ========= #
         td_target = reward + self.discount_factor * np.max(self.q(next_obs)) * (1 - terminated)
         td_error = td_target - self.q(obs, action)
+        td_error = np.clip(td_error, -5.0, 5.0)  # clip to prevent overflow
         self.w[:, action] += self.lr * td_error * obs
         # ====================================== #
 
@@ -140,83 +141,67 @@ class Linear_QN(BaseAlgorithm):
         obs, _ = env.reset()
         if isinstance(obs, dict):
             obs = obs["policy"]
-        # obs is a (num_agents, 4) GPU tensor; convert to numpy
         obs_np = obs.cpu().numpy()  # (num_agents, 4)
 
-        # Per-env tracking for episode returns and lengths
+        # Per-env tracking
         env_returns = np.zeros(num_agents)
         env_lengths = np.zeros(num_agents, dtype=int)
         completed_returns = []
         completed_lengths = []
 
+        # Number of envs to learn from each step (subset for speed)
+        learn_batch = min(16, num_agents)
+
         for timestep in range(1, max_steps + 1):
-            # --- Select actions for ALL envs (epsilon-greedy per env) ---
-            action_indices = np.empty(num_agents, dtype=int)
-            for i in range(num_agents):
-                if np.random.random() < self.epsilon:
-                    action_indices[i] = np.random.randint(self.num_of_action)
-                else:
-                    action_indices[i] = int(np.argmax(self.q(obs_np[i])))
+            # --- Vectorized action selection (epsilon-greedy) ---
+            # Q-values for all envs: obs_np @ self.w -> (num_agents, num_actions)
+            all_q = obs_np @ self.w  # (num_agents, num_of_action)
+            greedy_actions = np.argmax(all_q, axis=1)  # (num_agents,)
+            random_actions = np.random.randint(0, self.num_of_action, size=num_agents)
+            explore_mask = np.random.random(num_agents) < self.epsilon
+            action_indices = np.where(explore_mask, random_actions, greedy_actions)
 
-            # --- Build (num_agents,) scaled action tensor on GPU ---
-            scaled_actions = torch.tensor(
-                action_min + (action_indices / (self.num_of_action - 1)) * (action_max - action_min),
-                dtype=torch.float32,
-                device=obs.device,
-            )  # (num_agents,)
+            # --- Build scaled action tensor ---
+            scaled_np = action_min + (action_indices / (self.num_of_action - 1)) * (action_max - action_min)
+            scaled_actions = torch.tensor(scaled_np, dtype=torch.float32, device=obs.device)
 
-            # --- Step all envs simultaneously ---
-            # Isaac Lab expects (num_envs, action_dim) shape
+            # --- Step all envs (Isaac Lab expects (num_envs, action_dim)) ---
             next_obs, reward, terminated, truncated, _ = env.step(scaled_actions.unsqueeze(-1))
             if isinstance(next_obs, dict):
                 next_obs = next_obs["policy"]
 
-            next_obs_np = next_obs.cpu().numpy()       # (num_agents, 4)
-            reward_np = reward.cpu().numpy()            # (num_agents,)
-            terminated_np = terminated.cpu().numpy()    # (num_agents,)
-            truncated_np = truncated.cpu().numpy()      # (num_agents,)
-            done_np = np.logical_or(terminated_np, truncated_np)
+            next_obs_np = next_obs.cpu().numpy()
+            reward_np = reward.cpu().numpy().flatten()
+            terminated_np = terminated.cpu().numpy().flatten()
+            truncated_np = truncated.cpu().numpy().flatten()
+            done_np = terminated_np | truncated_np
 
-            # --- Update weights from ALL envs' transitions ---
-            for i in range(num_agents):
-                # Pick next action for SARSA-style next_action arg
-                next_action_index = int(np.argmax(self.q(next_obs_np[i])))
+            # --- Update weights from a random subset of envs (for speed) ---
+            batch_idx = np.random.choice(num_agents, learn_batch, replace=False)
+            for i in batch_idx:
+                next_action = int(np.argmax(self.q(next_obs_np[i])))
                 self.update(
-                    obs_np[i],
-                    action_indices[i],
-                    reward_np[i],
-                    next_obs_np[i],
-                    next_action_index,
-                    bool(terminated_np[i]),
+                    obs_np[i], action_indices[i], reward_np[i],
+                    next_obs_np[i], next_action, bool(terminated_np[i]),
                 )
 
-            # --- Accumulate per-env returns and lengths ---
+            # --- Track per-env returns ---
             env_returns += reward_np
             env_lengths += 1
+            done_mask = done_np.astype(bool)
+            if done_mask.any():
+                completed_returns.extend(env_returns[done_mask].tolist())
+                completed_lengths.extend(env_lengths[done_mask].tolist())
+                env_returns[done_mask] = 0.0
+                env_lengths[done_mask] = 0
 
-            # --- Log completed episodes and reset trackers ---
-            for i in range(num_agents):
-                if done_np[i]:
-                    completed_returns.append(env_returns[i])
-                    completed_lengths.append(env_lengths[i])
-                    env_returns[i] = 0.0
-                    env_lengths[i] = 0
-
-            # Isaac Lab auto-resets; next_obs is already the new obs
             obs_np = next_obs_np
             obs = next_obs
-
             self.decay_epsilon()
 
-        # Compute means over completed episodes (fallback to running totals)
-        if len(completed_returns) > 0:
-            mean_return = float(np.mean(completed_returns))
-            mean_length = float(np.mean(completed_lengths))
-        else:
-            mean_return = float(np.mean(env_returns))
-            mean_length = float(np.mean(env_lengths))
-
-        return mean_return, mean_length
+        if completed_returns:
+            return float(np.mean(completed_returns)), float(np.mean(completed_lengths))
+        return float(np.mean(env_returns)), float(np.mean(env_lengths))
         # ====================================== #
 
     # ------------------------------------------------------------------ #
