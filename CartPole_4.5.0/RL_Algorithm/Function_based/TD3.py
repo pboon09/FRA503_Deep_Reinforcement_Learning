@@ -330,73 +330,66 @@ class TD3(OffPolicyAlgorithm):
             target_param.data.copy_(self.tau * param.data + (1.0 - self.tau) * target_param.data)
         # ====================================== #
 
-    def learn(self, env, num_agents: int = 1, max_steps: int = 1000):
+    def learn(self, env, num_agents: int = 256, max_steps: int = 200):
         """
-        Train the agent for one episode (single env) or fixed-length run
-        (parallel envs).
+        Train the agent for a fixed-length run across parallel vectorized envs.
+
+        Isaac Lab auto-resets envs when done, so we never break early.
+        The returned next_obs is already the reset observation for done envs.
 
         Args:
-            env: The Isaac Lab environment.
+            env: The Isaac Lab vectorized environment.
             num_agents (int): Number of parallel environments.
-            max_steps (int): Steps per episode (single) or total steps (parallel).
+            max_steps (int): Total steps to run.
 
         Returns:
-            Tuple[float, int]: (episode_return, timestep)
+            Tuple[float, int]: (avg_episode_return, avg_episode_length)
         """
         # ========= put your code here ========= #
-        obs, _ = env.reset()
-        episode_return = 0.0
+        obs, _ = env.reset()  # (num_agents, obs_dim)
+        ep_returns = torch.zeros(num_agents, device=self.device)
+        ep_lengths = torch.zeros(num_agents, device=self.device)
+        completed_returns = []
+        completed_lengths = []
 
-        for timestep in range(max_steps):
-            # Select action (obs is already a torch.Tensor on GPU from Isaac Lab)
-            if obs.dim() == 2 and num_agents == 1:
-                state = obs.squeeze(0)
-            else:
-                state = obs
+        for step in range(max_steps):
+            # select_action handles batch input (dim==2 skips unsqueeze)
+            scaled_action = self.select_action(obs)  # (num_agents, action_dim)
 
-            scaled_action = self.select_action(state)
+            next_obs, reward, terminated, truncated, _ = env.step(scaled_action)
+            dones = (terminated | truncated).float()
 
-            # Step the environment
-            next_obs, reward, terminated, truncated, info = env.step(scaled_action)
-
-            done = terminated | truncated if isinstance(terminated, bool) else (terminated | truncated).float()
-
-            # Convert scaled action back to raw [-1, 1] for storage
+            # Convert scaled action back to raw [-1,1] for replay buffer storage
             action_min, action_max = self.action_range
             raw_action = (scaled_action - action_min) / (action_max - action_min) * 2.0 - 1.0
 
-            # Handle single vs multi agent
-            if num_agents == 1:
-                state_store = state.squeeze(0) if state.dim() > 1 else state
-                next_state_store = next_obs.squeeze(0) if next_obs.dim() > 1 else next_obs
-                action_store = raw_action.squeeze(0) if raw_action.dim() > 1 else raw_action
-                reward_val = reward.item() if isinstance(reward, torch.Tensor) else reward
-                done_val = done.item() if isinstance(done, torch.Tensor) else done
+            # Store all transitions
+            for i in range(num_agents):
+                self.store_transition(
+                    obs[i], raw_action[i], reward[i].item(),
+                    next_obs[i], dones[i].item()
+                )
 
-                self.store_transition(state_store, action_store, reward_val, next_state_store, done_val)
-                episode_return += reward_val
-            else:
-                for i in range(num_agents):
-                    s = state[i] if state.dim() > 1 else state
-                    a = raw_action[i] if raw_action.dim() > 1 else raw_action
-                    r = reward[i].item() if isinstance(reward, torch.Tensor) else reward
-                    ns = next_obs[i] if next_obs.dim() > 1 else next_obs
-                    d = done[i].item() if isinstance(done, torch.Tensor) else done
-                    self.store_transition(s, a, r, ns, d)
-                episode_return += reward.sum().item() if isinstance(reward, torch.Tensor) else reward
+            # Accumulate per-env episode returns and lengths
+            ep_returns += reward
+            ep_lengths += 1
 
-            # Update policy
+            # Track completed episodes (auto-reset envs)
+            done_mask = dones.bool().squeeze()
+            if done_mask.any():
+                done_indices = done_mask.nonzero(as_tuple=True)[0]
+                for idx in done_indices:
+                    completed_returns.append(ep_returns[idx].item())
+                    completed_lengths.append(ep_lengths[idx].item())
+                ep_returns[done_mask] = 0.0
+                ep_lengths[done_mask] = 0.0
+
             self.update_policy()
-
             obs = next_obs
 
-            # Check termination for single agent
-            if num_agents == 1:
-                done_check = done.item() if isinstance(done, torch.Tensor) else done
-                if done_check:
-                    break
-
-        return episode_return, timestep + 1
+        avg_return = sum(completed_returns) / len(completed_returns) if completed_returns else ep_returns.mean().item()
+        avg_length = sum(completed_lengths) / len(completed_lengths) if completed_lengths else max_steps
+        return avg_return, int(avg_length)
         # ====================================== #
 
     # ------------------------------------------------------------------ #

@@ -116,57 +116,106 @@ class Linear_QN(BaseAlgorithm):
         return scaled_action, action_index
         # ====================================== #
 
-    def learn(self, env, max_steps: int):
+    def learn(self, env, max_steps: int, num_agents: int = 256):
         """
-        Train the agent for one episode.
+        Train the agent across parallel vectorized environments.
+
+        Isaac Lab auto-resets envs when done. The returned next_obs is
+        already the reset observation, so we never break on done -- we
+        simply keep stepping for max_steps and track per-env returns.
 
         Args:
-            env: The environment.
-            max_steps (int): Maximum steps per episode.
+            env: Vectorized Isaac Lab environment with ``num_agents`` sub-envs.
+            max_steps (int): Total number of environment steps to take.
+            num_agents (int): Number of parallel environments (default 256).
 
         Returns:
-            Tuple[float, int]: (episode_return, timestep)
+            Tuple[float, float]: (mean_episode_return, mean_episode_length)
+                over all episodes that completed during the run.
         """
         # ========= put your code here ========= #
+        action_min, action_max = self.action_range
+
+        # --- Reset env and get initial obs (num_agents, obs_dim) ---
         obs, _ = env.reset()
-        # Convert observation to numpy
         if isinstance(obs, dict):
             obs = obs["policy"]
-        if isinstance(obs, torch.Tensor):
-            obs = obs.squeeze().cpu().numpy()
+        # obs is a (num_agents, 4) GPU tensor; convert to numpy
+        obs_np = obs.cpu().numpy()  # (num_agents, 4)
 
-        action, action_index = self.select_action(obs)
-        episode_return = 0.0
+        # Per-env tracking for episode returns and lengths
+        env_returns = np.zeros(num_agents)
+        env_lengths = np.zeros(num_agents, dtype=int)
+        completed_returns = []
+        completed_lengths = []
 
         for timestep in range(1, max_steps + 1):
-            next_obs, reward, terminated, truncated, _ = env.step(action)
+            # --- Select actions for ALL envs (epsilon-greedy per env) ---
+            action_indices = np.empty(num_agents, dtype=int)
+            for i in range(num_agents):
+                if np.random.random() < self.epsilon:
+                    action_indices[i] = np.random.randint(self.num_of_action)
+                else:
+                    action_indices[i] = int(np.argmax(self.q(obs_np[i])))
 
-            # Convert next_obs to numpy
+            # --- Build (num_agents,) scaled action tensor on GPU ---
+            scaled_actions = torch.tensor(
+                action_min + (action_indices / (self.num_of_action - 1)) * (action_max - action_min),
+                dtype=torch.float32,
+                device=obs.device,
+            )  # (num_agents,)
+
+            # --- Step all envs simultaneously ---
+            next_obs, reward, terminated, truncated, _ = env.step(scaled_actions)
             if isinstance(next_obs, dict):
                 next_obs = next_obs["policy"]
-            if isinstance(next_obs, torch.Tensor):
-                next_obs = next_obs.squeeze().cpu().numpy()
 
-            reward_value = reward.item() if isinstance(reward, torch.Tensor) else reward
-            terminated_value = terminated.item() if isinstance(terminated, torch.Tensor) else terminated
-            truncated_value = truncated.item() if isinstance(truncated, torch.Tensor) else truncated
+            next_obs_np = next_obs.cpu().numpy()       # (num_agents, 4)
+            reward_np = reward.cpu().numpy()            # (num_agents,)
+            terminated_np = terminated.cpu().numpy()    # (num_agents,)
+            truncated_np = truncated.cpu().numpy()      # (num_agents,)
+            done_np = np.logical_or(terminated_np, truncated_np)
 
-            next_action_tensor, next_action_index = self.select_action(next_obs)
+            # --- Update weights from ALL envs' transitions ---
+            for i in range(num_agents):
+                # Pick next action for SARSA-style next_action arg
+                next_action_index = int(np.argmax(self.q(next_obs_np[i])))
+                self.update(
+                    obs_np[i],
+                    action_indices[i],
+                    reward_np[i],
+                    next_obs_np[i],
+                    next_action_index,
+                    bool(terminated_np[i]),
+                )
 
-            self.update(obs, action_index, reward_value, next_obs, next_action_index, terminated_value)
+            # --- Accumulate per-env returns and lengths ---
+            env_returns += reward_np
+            env_lengths += 1
 
-            episode_return += reward_value
+            # --- Log completed episodes and reset trackers ---
+            for i in range(num_agents):
+                if done_np[i]:
+                    completed_returns.append(env_returns[i])
+                    completed_lengths.append(env_lengths[i])
+                    env_returns[i] = 0.0
+                    env_lengths[i] = 0
 
-            done = terminated_value or truncated_value
-            if done:
-                break
-
+            # Isaac Lab auto-resets; next_obs is already the new obs
+            obs_np = next_obs_np
             obs = next_obs
-            action = next_action_tensor
-            action_index = next_action_index
 
-        self.decay_epsilon()
-        return episode_return, timestep
+            self.decay_epsilon()
+
+        # Compute means over completed episodes (fallback to running totals)
+        if len(completed_returns) > 0:
+            mean_return = float(np.mean(completed_returns))
+            mean_length = float(np.mean(completed_lengths))
+        else:
+            mean_return = float(np.mean(env_returns))
+            mean_length = float(np.mean(env_lengths))
+
+        return mean_return, mean_length
         # ====================================== #
 
     # ------------------------------------------------------------------ #

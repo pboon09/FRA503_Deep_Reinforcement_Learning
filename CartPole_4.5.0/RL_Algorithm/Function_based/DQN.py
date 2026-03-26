@@ -240,66 +240,114 @@ class DQN(OffPolicyAlgorithm):
             target_param.data.copy_(self.tau * param.data + (1.0 - self.tau) * target_param.data)
         # ====================================== #
 
-    def learn(self, env, num_agents: int = 1, max_steps: int = 1000):
+    def learn(self, env, num_agents: int = 256, max_steps: int = 1000):
         """
-        Train the agent for one episode (single env) or one fixed-length
-        run (parallel envs).
+        Train the agent across parallel vectorized environments.
+
+        Isaac Lab auto-resets envs when done. The returned next_obs is
+        already the reset observation, so we never break on done -- we
+        simply keep stepping for max_steps and track per-env returns.
 
         Args:
-            env: The Isaac Lab environment.
-            num_agents (int): Number of parallel environments.
-            max_steps (int): Steps per episode (single) or total env steps (parallel).
+            env: Vectorized Isaac Lab environment with ``num_agents`` sub-envs.
+            num_agents (int): Number of parallel environments (default 256).
+            max_steps (int): Total number of environment steps to take.
 
         Returns:
-            Tuple[float, int]: (episode_return, timestep)
+            Tuple[float, float]: (mean_episode_return, mean_episode_length)
+                over all episodes that completed during the run.
         """
-
         # ========= put your code here ========= #
-        obs, _ = env.reset()
+        import random as _random
 
-        # Handle dict obs (Isaac Lab style)
+        action_min, action_max = self.action_range
+
+        # --- Reset env and get initial obs (num_agents, obs_dim) ---
+        obs, _ = env.reset()
         if isinstance(obs, dict):
             obs = obs["policy"]
-        if isinstance(obs, torch.Tensor):
-            obs = obs.squeeze(0) if obs.dim() > 1 and obs.size(0) == 1 else obs
+        # obs shape: (num_agents, obs_dim) tensor on GPU
 
-        episode_return = 0.0
+        # Per-env tracking for episode returns and lengths
+        env_returns = torch.zeros(num_agents, device=self.device)
+        env_lengths = torch.zeros(num_agents, dtype=torch.long, device=self.device)
+        completed_returns = []
+        completed_lengths = []
 
         for timestep in range(1, max_steps + 1):
-            action_tensor, action_index = self.select_action(obs)
+            # --- Batch epsilon-greedy action selection ---
+            with torch.no_grad():
+                q_values = self.policy_net(obs)  # (num_agents, num_of_action)
+                greedy_actions = q_values.argmax(dim=1)  # (num_agents,)
 
-            next_obs, reward, terminated, truncated, _ = env.step(action_tensor)
+            # Random actions for exploration
+            random_actions = torch.randint(
+                0, self.num_of_action, (num_agents,), device=self.device
+            )
 
-            # Handle dict obs
+            # Per-env epsilon-greedy mask
+            explore_mask = torch.rand(num_agents, device=self.device) < self.epsilon
+            action_indices = torch.where(explore_mask, random_actions, greedy_actions)  # (num_agents,)
+
+            # --- Build (num_agents,) scaled action tensor ---
+            scaled_actions = (
+                action_min
+                + (action_indices.float() / (self.num_of_action - 1))
+                * (action_max - action_min)
+            )  # (num_agents,)
+
+            # --- Step all envs simultaneously ---
+            next_obs, reward, terminated, truncated, _ = env.step(scaled_actions)
             if isinstance(next_obs, dict):
                 next_obs = next_obs["policy"]
-            if isinstance(next_obs, torch.Tensor):
-                next_obs = next_obs.squeeze(0) if next_obs.dim() > 1 and next_obs.size(0) == 1 else next_obs
 
-            reward_value = reward.item() if isinstance(reward, torch.Tensor) else reward
-            terminated_value = terminated.item() if isinstance(terminated, torch.Tensor) else terminated
-            truncated_value = truncated.item() if isinstance(truncated, torch.Tensor) else truncated
+            done = terminated | truncated  # (num_agents,) bool tensor
 
-            episode_return += reward_value
+            # --- Store transitions for ALL envs in replay buffer ---
+            for i in range(num_agents):
+                obs_i = obs[i]                  # (obs_dim,) tensor
+                act_i = action_indices[i].item()
+                rew_i = reward[i].item()
+                term_i = terminated[i].item()
+                done_i = done[i].item()
 
-            done = terminated_value or truncated_value
+                # Store next_state as None if terminal (for proper Bellman backup)
+                if done_i:
+                    self.store_transition(obs_i, act_i, rew_i, None, term_i)
+                else:
+                    self.store_transition(obs_i, act_i, rew_i, next_obs[i], term_i)
 
-            # Store transition: next_state is None if terminal
-            if done:
-                self.store_transition(obs, action_index, reward_value, None, terminated_value)
-            else:
-                self.store_transition(obs, action_index, reward_value, next_obs, terminated_value)
-
-            # Update policy and target networks
+            # --- Update policy and target networks ---
             self.update_policy()
             self.update_target_networks()
 
-            if done:
-                break
+            # --- Accumulate per-env returns and lengths ---
+            env_returns += reward
+            env_lengths += 1
 
+            # --- Log completed episodes and reset trackers ---
+            done_cpu = done.cpu()
+            for i in range(num_agents):
+                if done_cpu[i]:
+                    completed_returns.append(env_returns[i].item())
+                    completed_lengths.append(env_lengths[i].item())
+                    env_returns[i] = 0.0
+                    env_lengths[i] = 0
+
+            # Isaac Lab auto-resets; next_obs is already the new obs
             obs = next_obs
 
-        return episode_return, timestep
+            self.decay_epsilon()
+
+        # Compute means over completed episodes (fallback to running totals)
+        if len(completed_returns) > 0:
+            mean_return = sum(completed_returns) / len(completed_returns)
+            mean_length = sum(completed_lengths) / len(completed_lengths)
+        else:
+            mean_return = env_returns.mean().item()
+            mean_length = env_lengths.float().mean().item()
+
+        return mean_return, mean_length
         # ====================================== #
 
     # ------------------------------------------------------------------ #

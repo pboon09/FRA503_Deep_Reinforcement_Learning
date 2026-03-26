@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -346,25 +347,103 @@ class AC(OnPolicyAlgorithm):
     # Main Training Loop                                                   #
     # ------------------------------------------------------------------ #
 
-    def learn(self, env, max_steps: int, num_agents: int) -> tuple:
+    def learn(self, env, max_steps: int = 600, num_agents: int = 1) -> tuple:
         """
-        Train the agent for one episode.
+        Train the agent for one episode (num_agents=1) or one rollout of
+        ``max_steps`` across ``num_agents`` parallel environments.
+
+        With parallel envs (num_agents > 1):
+        - Collect a fixed rollout of ``max_steps`` from all envs.
+        - When an env signals done, compute MC returns for that completed
+          episode and accumulate actor + critic loss.
+        - After the rollout, perform a single averaged gradient update.
 
         Args:
             env: The environment.
-            max_steps (int): Maximum steps per episode.
-            num_agents (int): Number of parallel agents.
+            max_steps (int): Maximum steps per rollout (parallel) or per
+                             episode cap (single).
+            num_agents (int): Number of parallel agents (1 for single env,
+                              >1 for vectorised Isaac Lab envs).
 
         Returns:
-            Tuple: (episode_return, loss, timestep)
+            Tuple: (avg_return, loss, timestep_or_lengths)
         """
         self.policy.train()
 
         # ========= put your code here ========= #
-        episode_return, log_prob_actions, values, rewards, timestep = self.generate_trajectory(env)
-        returns = self.compute_returns(rewards)
-        loss = self.update_policy(log_prob_actions, values, returns)
-        return episode_return, loss, timestep
+        # ----- Single-env path (original behaviour) ----- #
+        if num_agents == 1:
+            episode_return, log_prob_actions, values, rewards, timestep = self.generate_trajectory(env)
+            returns = self.compute_returns(rewards)
+            loss = self.update_policy(log_prob_actions, values, returns)
+            return episode_return, loss, timestep
+
+        # ----- Parallel-env path ----- #
+        obs, _ = env.reset()  # (num_agents, obs_dim)
+        obs = obs.to(self.device)
+
+        # Per-env episode storage
+        env_log_probs    = [[] for _ in range(num_agents)]
+        env_values       = [[] for _ in range(num_agents)]
+        env_rewards_list = [[] for _ in range(num_agents)]
+        completed_returns = []
+        completed_lengths = []
+        total_loss = 0.0
+        num_updates = 0
+
+        for step in range(max_steps):
+            obs_tensor = obs.to(self.device)
+            action   = self.policy.act(obs_tensor)               # (N, action_dim) or (N, 1)
+            value    = self.policy.evaluate(obs_tensor)           # (N, 1)
+            log_prob = self.policy.get_actions_log_prob(action)   # (N,)
+
+            # Prepare action for the environment
+            if self.action_type == "continuous":
+                action_env = action.clamp(self.action_range[0], self.action_range[1])
+            else:
+                action_env = action
+
+            next_obs, reward, terminated, truncated, _ = env.step(action_env)
+            dones = terminated | truncated  # (N,)
+
+            # Store per-env data and handle episode boundaries
+            for i in range(num_agents):
+                env_log_probs[i].append(log_prob[i])
+                env_values[i].append(value[i].squeeze())
+                env_rewards_list[i].append(reward[i])
+
+                if dones[i]:
+                    # Episode completed for env i
+                    if len(env_rewards_list[i]) > 1:
+                        rewards_t = torch.stack(env_rewards_list[i])
+                        returns   = self.compute_returns(rewards_t)
+                        lp        = torch.stack(env_log_probs[i])
+                        vals      = torch.stack(env_values[i])
+                        actor_loss, critic_loss = self.calculate_loss(lp, vals, returns)
+                        loss = actor_loss + self.value_loss_coef * critic_loss
+                        total_loss += loss
+                        num_updates += 1
+                        completed_returns.append(rewards_t.sum().item())
+                        completed_lengths.append(len(env_rewards_list[i]))
+                    # Reset storage for this env (Isaac Lab auto-resets)
+                    env_log_probs[i]    = []
+                    env_values[i]       = []
+                    env_rewards_list[i] = []
+
+            obs = next_obs
+
+        # Single averaged gradient update
+        if num_updates > 0:
+            avg_loss = total_loss / num_updates
+            self.optimizer.zero_grad()
+            avg_loss.backward()
+            nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+            self.optimizer.step()
+
+        avg_return = np.mean(completed_returns) if completed_returns else 0.0
+        avg_length = int(np.mean(completed_lengths)) if completed_lengths else max_steps
+        loss_val   = avg_loss.item() if num_updates > 0 else 0.0
+        return avg_return, loss_val, avg_length
         # ====================================== #
 
     # ------------------------------------------------------------------ #

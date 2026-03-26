@@ -1,15 +1,14 @@
 """
 Run all 8 function-based RL algorithms sequentially on the CartPole Stabilize task.
+All algorithms use 256 parallel environments for fast training.
 
 For each algorithm:
-  1. Train for n_episodes episodes (with progress bar)
-  2. Deploy (evaluate) for 10 episodes with deterministic policy
+  1. Train for n_episodes iterations (with progress bar)
+  2. Deploy (evaluate) for 10 episodes with deterministic policy (1 env)
   3. Save training CSV, deployment CSV, and final model
 
 Usage (Isaac Lab):
-    python run_experiment.py --task Stabilize-Isaac-Cartpole-v0
-
-The script expects the Isaac Lab simulator and CartPole extension to be available.
+    python run_experiment.py --task Stabilize-Isaac-Cartpole-v0 --headless
 """
 
 import argparse
@@ -29,8 +28,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__))))
 parser = argparse.ArgumentParser(description="Run all RL experiments.")
 parser.add_argument("--task", type=str, default="Stabilize-Isaac-Cartpole-v0",
                     help="Isaac Lab task name.")
-parser.add_argument("--num_envs", type=int, default=1,
-                    help="Number of parallel environments (overridden per-algo for A2C/PPO).")
+parser.add_argument("--num_envs", type=int, default=256,
+                    help="Number of parallel environments.")
 parser.add_argument("--seed", type=int, default=42, help="Random seed.")
 parser.add_argument("--config", type=str,
                     default=os.path.join(os.path.dirname(__file__),
@@ -106,7 +105,7 @@ def build_agent(algo_name: str, cfg: dict, shared: dict, device: torch.device):
     action_range = shared["action_range"]
     n_obs = shared["n_observations"]
     gamma = shared["discount_factor"]
-    ac = cfg  # algorithm-specific config
+    ac = cfg
 
     if algo_name == "Linear_Q":
         return Linear_QN(
@@ -156,7 +155,7 @@ def build_agent(algo_name: str, cfg: dict, shared: dict, device: torch.device):
             hidden_dims=ac["hidden_dims"],
             activation=ac.get("activation", "elu"),
             action_type=ac["action_type"],
-            init_noise_std=ac.get("init_noise_std", 0.6),
+            init_noise_std=ac.get("init_noise_std", 1.0),
             learning_rate=ac["learning_rate"],
             discount_factor=gamma,
             value_loss_coef=ac.get("value_loss_coef", 0.5),
@@ -172,7 +171,7 @@ def build_agent(algo_name: str, cfg: dict, shared: dict, device: torch.device):
             hidden_dims=ac["hidden_dims"],
             activation=ac.get("activation", "elu"),
             action_type=ac["action_type"],
-            init_noise_std=ac.get("init_noise_std", 0.6),
+            init_noise_std=ac.get("init_noise_std", 1.0),
             learning_rate=ac["learning_rate"],
             discount_factor=gamma,
             value_loss_coef=ac.get("value_loss_coef", 0.5),
@@ -239,106 +238,94 @@ def build_agent(algo_name: str, cfg: dict, shared: dict, device: torch.device):
 
 
 # ------------------------------------------------------------------ #
-# Training loops                                                       #
+# Unified training loop (all algos use 256 parallel envs)              #
 # ------------------------------------------------------------------ #
 
-def train_episodic(agent, env, algo_name, n_episodes, max_steps, csv_writer, device):
-    """Train episodic algorithms (Linear_Q, DQN, MC_REINFORCE, AC, SAC, TD3)."""
+def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes,
+                    num_envs, csv_writer, device):
+    """Train any algorithm using 256 parallel envs."""
+    max_steps = algo_cfg.get("max_steps", shared_cfg.get("max_steps", 200))
     global_step = 0
-    obs, _ = env.reset()
 
-    for episode in tqdm(range(n_episodes), desc=f"Training {algo_name}", ncols=100):
-        if algo_name == "Linear_Q":
-            ep_return, timestep = agent.learn(env, max_steps=max_steps)
-        elif algo_name == "DQN":
-            ep_return, timestep = agent.learn(env, num_agents=1, max_steps=max_steps)
-        elif algo_name == "MC_REINFORCE":
-            result = agent.learn(env, num_agents=1)
-            ep_return = result[0]
-            timestep = len(result[2]) if len(result) > 2 and result[2] is not None else 0
-        elif algo_name == "AC":
-            result = agent.learn(env, max_steps=max_steps, num_agents=1)
-            ep_return = result[0]
-            timestep = result[2] if len(result) > 2 else 0
-        elif algo_name in ("SAC", "TD3"):
-            ep_return, timestep = agent.learn(env, num_agents=1, max_steps=max_steps)
-        else:
-            raise ValueError(f"Not an episodic algo: {algo_name}")
+    # --- On-policy parallel algorithms (A2C, PPO) ---
+    if algo_name in ("A2C", "PPO"):
+        num_transitions = algo_cfg["num_transitions_per_env"]
+        obs, _ = env.reset()
+        n_obs = obs.shape[-1]
+        action_type = algo_cfg.get("action_type", "continuous")
+        actions_shape = (agent.num_of_action,) if action_type == "continuous" else (1,)
+        agent._init_storage(num_envs, num_transitions, (n_obs,), actions_shape, device)
 
-        global_step += timestep
-        epsilon = getattr(agent, 'epsilon', 0.0) or 0.0
+        for episode in tqdm(range(n_episodes), desc=f"Training {algo_name}", ncols=100):
+            ep_return = 0.0
 
-        csv_writer.writerow({
-            "episode": episode,
-            "ep_return": ep_return,
-            "ep_length": timestep,
-            "global_step": global_step,
-            "epsilon": epsilon,
-        })
+            with torch.inference_mode():
+                for _ in range(num_transitions):
+                    actions = agent.act(obs)
+                    action_min, action_max = agent.action_range
+                    if action_min is not None and action_type == "continuous":
+                        env_actions = actions.clamp(action_min, action_max)
+                    else:
+                        env_actions = actions
+                    next_obs, rewards, terminated, truncated, _ = env.step(env_actions)
+                    dones = terminated | truncated
+                    agent.process_env_step(rewards, dones)
+                    obs = next_obs
+                    ep_return += rewards.mean().item()
 
-        # # Live plot (commented out)
-        # agent.plot_durations(timestep)
+                agent.compute_returns(obs)
 
+            agent.update()
+            global_step += num_envs * num_transitions
 
-def train_parallel(agent, env, algo_name, cfg, n_episodes, csv_writer, device):
-    """Train parallel-env algorithms (A2C, PPO)."""
-    num_envs = cfg.get("num_envs", 16)
-    num_transitions = cfg["num_transitions_per_env"]
+            csv_writer.writerow({
+                "episode": episode,
+                "ep_return": ep_return,
+                "ep_length": num_transitions,
+                "global_step": global_step,
+                "epsilon": 0.0,
+            })
 
-    global_step = 0
-    obs, _ = env.reset()
+    # --- All other algorithms (vectorized learn()) ---
+    else:
+        for episode in tqdm(range(n_episodes), desc=f"Training {algo_name}", ncols=100):
+            if algo_name == "Linear_Q":
+                ep_return, timestep = agent.learn(env, max_steps=max_steps,
+                                                   num_agents=num_envs)
+            elif algo_name == "DQN":
+                ep_return, timestep = agent.learn(env, num_agents=num_envs,
+                                                   max_steps=max_steps)
+            elif algo_name == "MC_REINFORCE":
+                result = agent.learn(env, num_agents=num_envs,
+                                     max_steps=max_steps)
+                ep_return = result[0]
+                timestep = result[2] if len(result) > 2 and isinstance(result[2], (int, float)) else max_steps
+            elif algo_name == "AC":
+                result = agent.learn(env, max_steps=max_steps,
+                                     num_agents=num_envs)
+                ep_return = result[0]
+                timestep = result[2] if len(result) > 2 else max_steps
+            elif algo_name in ("SAC", "TD3"):
+                ep_return, timestep = agent.learn(env, num_agents=num_envs,
+                                                   max_steps=max_steps)
 
-    # Initialize storage
-    n_obs = obs.shape[-1] if hasattr(obs, 'shape') else 4
-    actions_shape = (agent.num_of_action,) if cfg.get("action_type", "continuous") == "continuous" else (1,)
-    agent._init_storage(num_envs, num_transitions, (n_obs,), actions_shape, device)
+            global_step += num_envs * timestep
+            epsilon = getattr(agent, 'epsilon', 0.0) or 0.0
 
-    for episode in tqdm(range(n_episodes), desc=f"Training {algo_name}", ncols=100):
-        ep_return = 0.0
-        ep_length = 0
+            csv_writer.writerow({
+                "episode": episode,
+                "ep_return": ep_return,
+                "ep_length": timestep,
+                "global_step": global_step,
+                "epsilon": epsilon,
+            })
 
-        # Collect rollout
-        with torch.inference_mode():
-            for step in range(num_transitions):
-                actions = agent.act(obs)
-
-                # Clamp continuous actions to action range
-                action_min, action_max = agent.action_range
-                if action_min is not None:
-                    env_actions = actions.clamp(action_min, action_max)
-                else:
-                    env_actions = actions
-
-                next_obs, rewards, terminated, truncated, info = env.step(env_actions)
-                dones = terminated | truncated
-
-                agent.process_env_step(rewards, dones)
-
-                obs = next_obs
-                ep_return += rewards.mean().item()
-                ep_length += 1
-
-            # Bootstrap value at end of rollout
-            agent.compute_returns(obs)
-
-        # Policy update
-        update_info = agent.update()
-        global_step += num_envs * num_transitions
-
-        csv_writer.writerow({
-            "episode": episode,
-            "ep_return": ep_return,
-            "ep_length": ep_length * num_envs,
-            "global_step": global_step,
-            "epsilon": 0.0,
-        })
-
-        # # Live plot (commented out)
-        # agent.plot_durations(ep_length)
+            # # Live plot (commented out)
+            # agent.plot_durations(timestep)
 
 
 def deploy(agent, env, algo_name, n_episodes, max_steps, csv_writer, device):
-    """Deploy (evaluate) the trained agent for n_episodes with deterministic policy."""
+    """Deploy (evaluate) the trained agent for n_episodes with deterministic policy (1 env)."""
     print(f"\n  Deploying {algo_name} for {n_episodes} episodes...")
 
     for episode in range(n_episodes):
@@ -372,7 +359,7 @@ def deploy(agent, env, algo_name, n_episodes, max_steps, csv_writer, device):
                 elif algo_name in ("AC", "A2C", "PPO"):
                     state = obs if obs.dim() >= 2 else obs.unsqueeze(0)
                     action = agent.select_action(state)
-                    if agent.action_type == "continuous":
+                    if hasattr(agent, 'action_type') and agent.action_type == "continuous":
                         action = action.clamp(agent.action_range[0], agent.action_range[1])
                 elif algo_name == "SAC":
                     action = agent.select_action(obs, evaluate=True)
@@ -414,7 +401,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg,
     config = load_config(args_cli.config)
     shared = config["shared"]
     n_episodes = shared["n_episodes"]
-    max_steps = 1000
+    num_envs = shared.get("num_envs", args_cli.num_envs)
     task_name = str(args_cli.task).split("-")[0]
 
     # Output directories
@@ -432,16 +419,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg,
 
         algo_cfg = config["algorithms"][algo_name]
         print(f"\n{'='*60}")
-        print(f"  Algorithm: {algo_name}")
+        print(f"  Algorithm: {algo_name} ({num_envs} parallel envs)")
         print(f"{'='*60}")
 
-        # Determine num_envs for this algo
-        if algo_name in ("A2C", "PPO"):
-            num_envs = algo_cfg.get("num_envs", 16)
-        else:
-            num_envs = 1
-
-        # Create environment
+        # Create environment with 256 parallel envs for training
         env = make_env(args_cli.task, env_cfg, num_envs=num_envs)
 
         # Build agent
@@ -454,13 +435,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg,
         # ---- Train ---- #
         train_csv_path = os.path.join(exp_dir, f"{algo_name}.csv")
         with open(train_csv_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["episode", "ep_return", "ep_length", "global_step", "epsilon"])
+            writer = csv.DictWriter(f, fieldnames=[
+                "episode", "ep_return", "ep_length", "global_step", "epsilon"])
             writer.writeheader()
-
-            if algo_name in ("A2C", "PPO"):
-                train_parallel(agent, env, algo_name, algo_cfg, n_episodes, writer, device)
-            else:
-                train_episodic(agent, env, algo_name, n_episodes, max_steps, writer, device)
+            train_algorithm(agent, env, algo_name, algo_cfg, shared,
+                            n_episodes, num_envs, writer, device)
 
         # Save final model
         if algo_name == "Linear_Q":
@@ -470,25 +449,25 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg,
 
         print(f"  Training complete. Model saved to {model_dir}")
 
-        # ---- Deploy ---- #
-        # For parallel-env algos, recreate env with 1 env for deployment
-        if num_envs > 1:
-            env.close()
-            env = make_env(args_cli.task, env_cfg, num_envs=1)
+        # Close training env, create 1-env for deployment
+        env.close()
+        env = make_env(args_cli.task, env_cfg, num_envs=1)
 
+        # ---- Deploy ---- #
         deploy_csv_path = os.path.join(exp_dir, f"{algo_name}_deploy.csv")
         with open(deploy_csv_path, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=["episode", "ep_return", "ep_length"])
             writer.writeheader()
-            deploy(agent, env, algo_name, args_cli.deploy_episodes, max_steps, writer, device)
+            deploy(agent, env, algo_name, args_cli.deploy_episodes, 1000, writer, device)
 
         print(f"  Deployment complete. Results saved to {deploy_csv_path}")
 
-        # Save training summary txt
+        # Save training summary
         summary_path = os.path.join(exp_dir, f"{algo_name}_summary.txt")
         with open(summary_path, "w") as f:
             f.write(f"Algorithm: {algo_name}\n")
             f.write(f"Task: {args_cli.task}\n")
+            f.write(f"Num Envs: {num_envs}\n")
             f.write(f"Episodes: {n_episodes}\n")
             f.write(f"Config: {json.dumps(algo_cfg, indent=2)}\n")
             f.write(f"Shared: {json.dumps(shared, indent=2)}\n")

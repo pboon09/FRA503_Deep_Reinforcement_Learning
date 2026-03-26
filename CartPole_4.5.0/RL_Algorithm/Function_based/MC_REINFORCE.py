@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -311,23 +312,110 @@ class MC_REINFORCE(BaseAlgorithm):
         return loss.item()
         # ====================================== #
 
-    def learn(self, env, num_agents: int = 1):
+    def _scale_action_batch(self, actions: torch.Tensor) -> torch.Tensor:
         """
-        Train the agent for one episode.
+        Vectorised version of scale_action for a batch of discrete action indices.
+
+        Maps each discrete action index in [0, num_of_action - 1] to a
+        continuous value in [action_min, action_max].
+
+        Args:
+            actions (Tensor): Integer action indices, shape ``(batch, 1)``.
+
+        Returns:
+            Tensor: Scaled continuous actions, shape ``(batch, 1)``.
+        """
+        action_min, action_max = self.action_range
+        continuous = action_min + (actions.float() / (self.num_of_action - 1)) * (action_max - action_min)
+        return continuous
+
+    def learn(self, env, num_agents: int = 1, max_steps: int = 600):
+        """
+        Train the agent for one episode (num_agents=1) or one rollout of
+        ``max_steps`` across ``num_agents`` parallel environments.
+
+        With parallel envs (num_agents > 1):
+        - Collect a fixed rollout of ``max_steps`` from all envs.
+        - When an env signals done, compute MC returns for that completed
+          episode and accumulate the policy gradient loss.
+        - After the rollout, perform a single averaged policy update.
 
         Args:
             env: The environment.
-            num_agents (int): Number of parallel agents (>1 for vectorised envs).
+            num_agents (int): Number of parallel agents (1 for single env,
+                              >1 for vectorised Isaac Lab envs).
+            max_steps (int): Maximum number of steps per rollout when using
+                             parallel envs.  Ignored when ``num_agents == 1``.
 
         Returns:
-            Tuple: (episode_return, loss, trajectory)
+            Tuple: (avg_return, loss, episode_lengths)
         """
         self.policy_net.train()
 
         # ========= put your code here ========= #
-        episode_return, stepwise_returns, log_prob_actions, trajectory = self.generate_trajectory(env)
-        loss = self.update_policy(stepwise_returns, log_prob_actions)
-        return episode_return, loss, trajectory
+        # ----- Single-env path (original behaviour) ----- #
+        if num_agents == 1:
+            episode_return, stepwise_returns, log_prob_actions, trajectory = self.generate_trajectory(env)
+            loss = self.update_policy(stepwise_returns, log_prob_actions)
+            return episode_return, loss, trajectory
+
+        # ----- Parallel-env path ----- #
+        obs, _ = env.reset()  # (num_agents, obs_dim)
+        obs = obs.to(self.device)
+
+        # Per-env episode storage
+        env_log_probs = [[] for _ in range(num_agents)]
+        env_rewards   = [[] for _ in range(num_agents)]
+        completed_returns = []
+        completed_lengths = []
+        total_loss = 0.0
+        num_updates = 0
+
+        for step in range(max_steps):
+            obs_tensor = obs.to(self.device)
+            dist = self._get_distribution(obs_tensor)          # batched
+            action, log_prob = self._sample_action(dist)       # (N, ...), (N,)
+
+            # Prepare action for the environment
+            if self.action_type == "continuous":
+                env_action = action.clamp(self.action_range[0], self.action_range[1])
+            else:
+                env_action = self._scale_action_batch(action)  # (N, 1)
+
+            next_obs, reward, terminated, truncated, _ = env.step(env_action)
+            dones = terminated | truncated  # (N,)
+
+            # Store per-env data and handle episode boundaries
+            for i in range(num_agents):
+                env_log_probs[i].append(log_prob[i])
+                env_rewards[i].append(reward[i].item())
+
+                if dones[i]:
+                    # Episode completed for env i
+                    if len(env_rewards[i]) > 1:
+                        returns = self.calculate_stepwise_returns(env_rewards[i])
+                        lp = torch.stack(env_log_probs[i])
+                        loss = self.calculate_loss(returns, lp)
+                        total_loss += loss
+                        num_updates += 1
+                        completed_returns.append(sum(env_rewards[i]))
+                        completed_lengths.append(len(env_rewards[i]))
+                    # Reset storage for this env (Isaac Lab auto-resets)
+                    env_log_probs[i] = []
+                    env_rewards[i]   = []
+
+            obs = next_obs
+
+        # Single averaged gradient update
+        if num_updates > 0:
+            avg_loss = total_loss / num_updates
+            self.optimizer.zero_grad()
+            avg_loss.backward()
+            self.optimizer.step()
+
+        avg_return = np.mean(completed_returns) if completed_returns else 0.0
+        loss_val   = avg_loss.item() if num_updates > 0 else 0.0
+        return avg_return, loss_val, completed_lengths
         # ====================================== #
 
     # ------------------------------------------------------------------ #
