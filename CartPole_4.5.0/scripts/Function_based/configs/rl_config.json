@@ -7,7 +7,7 @@
     },
     "algorithms": {
         "Linear_Q": {
-            "n_episodes": 1000,
+            "n_episodes": 200,
             "num_of_action": 11,
             "learning_rate": 0.01,
             "lr_decay": 0.9995,
