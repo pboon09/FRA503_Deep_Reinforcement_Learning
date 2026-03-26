@@ -368,14 +368,14 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes,
         completed = 0
 
         # Per-env storage for MC algorithms (REINFORCE, AC)
+        # Store obs/actions (detached), recompute log_probs on episode end
         if algo_name in ("MC_REINFORCE", "AC"):
-            env_log_probs = [[] for _ in range(num_envs)]
+            env_obs = [[] for _ in range(num_envs)]
+            env_actions = [[] for _ in range(num_envs)]
             env_rewards = [[] for _ in range(num_envs)]
-            if algo_name == "AC":
-                env_values = [[] for _ in range(num_envs)]
             num_updates = 0
-            update_every = 50  # gradient step every N completed episodes
-            agent.optimizer.zero_grad()  # start with clean gradients
+            update_every = 50
+            agent.optimizer.zero_grad()
 
         pbar = tqdm(total=n_episodes, desc=f"Training {algo_name}", ncols=100)
 
@@ -418,20 +418,29 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes,
                 agent.decay_epsilon()
 
             elif algo_name == "MC_REINFORCE":
-                action, log_prob = extra
+                action, _ = extra
                 rew_cpu = reward.cpu().numpy()
                 done_cpu = done.cpu().numpy()
                 for i in range(num_envs):
-                    env_log_probs[i].append(log_prob[i])
+                    env_obs[i].append(obs[i].detach())
+                    env_actions[i].append(action[i].detach())
                     env_rewards[i].append(float(rew_cpu[i]))
                     if done_cpu[i] and len(env_rewards[i]) > 1:
+                        # Recompute log_probs with fresh graph
+                        ep_obs = torch.stack(env_obs[i])
+                        ep_act = torch.stack(env_actions[i])
+                        dist = agent._get_distribution(ep_obs)
+                        if agent.action_type == "continuous":
+                            lp = dist.log_prob(ep_act).sum(dim=-1)
+                        else:
+                            lp = dist.log_prob(ep_act.squeeze(-1))
                         returns = agent.calculate_stepwise_returns(env_rewards[i])
-                        lp = torch.stack(env_log_probs[i])
                         loss = agent.calculate_loss(returns, lp) / update_every
-                        loss.backward()  # accumulate gradients immediately
+                        loss.backward()
                         num_updates += 1
                     if done_cpu[i]:
-                        env_log_probs[i] = []
+                        env_obs[i] = []
+                        env_actions[i] = []
                         env_rewards[i] = []
                 if num_updates >= update_every:
                     agent.optimizer.step()
@@ -439,24 +448,29 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes,
                     num_updates = 0
 
             elif algo_name == "AC":
-                action, log_prob, value = extra
+                action, _, _ = extra
                 done_cpu = done.cpu().numpy()
+                rew_cpu = reward.cpu().numpy()
                 for i in range(num_envs):
-                    env_log_probs[i].append(log_prob[i])
-                    env_values[i].append(value[i].squeeze())
-                    env_rewards[i].append(reward[i])
+                    env_obs[i].append(obs[i].detach())
+                    env_actions[i].append(action[i].detach())
+                    env_rewards[i].append(float(rew_cpu[i]))
                     if done_cpu[i] and len(env_rewards[i]) > 1:
-                        rewards_t = torch.stack(env_rewards[i])
-                        returns = agent.compute_returns(rewards_t)
-                        lp = torch.stack(env_log_probs[i])
-                        vals = torch.stack(env_values[i])
+                        # Recompute log_probs & values with fresh graph
+                        ep_obs = torch.stack(env_obs[i])
+                        ep_act = torch.stack(env_actions[i])
+                        agent.policy._update_distribution(ep_obs)
+                        lp = agent.policy.get_actions_log_prob(ep_act)
+                        vals = agent.policy.evaluate(ep_obs).squeeze(-1)
+                        returns = agent.compute_returns(
+                            torch.tensor(env_rewards[i], device=device))
                         al, cl = agent.calculate_loss(lp, vals, returns)
                         loss = (al + agent.value_loss_coef * cl) / update_every
-                        loss.backward()  # accumulate gradients immediately
+                        loss.backward()
                         num_updates += 1
                     if done_cpu[i]:
-                        env_log_probs[i] = []
-                        env_values[i] = []
+                        env_obs[i] = []
+                        env_actions[i] = []
                         env_rewards[i] = []
                 if num_updates >= update_every:
                     torch.nn.utils.clip_grad_norm_(agent.policy.parameters(), agent.max_grad_norm)
