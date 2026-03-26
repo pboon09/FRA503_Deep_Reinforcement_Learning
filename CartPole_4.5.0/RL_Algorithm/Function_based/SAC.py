@@ -195,9 +195,10 @@ class SAC(OffPolicyAlgorithm):
         # ===== Automatic temperature tuning ===== #
         # log_alpha is optimised instead of alpha directly to keep alpha > 0.
         # target_entropy is set to -action_dim as a heuristic (Haarnoja et al. 2018).
+        import math
         self.log_alpha      = torch.tensor(
-            [float(init_alpha)], requires_grad=True, device=device
-        ).log()
+            [math.log(max(float(init_alpha), 1e-8))], requires_grad=True, device=device
+        )
         self.alpha          = self.log_alpha.exp().item()
         self.alpha_optimizer = optim.Adam([self.log_alpha], lr=alpha_lr)
         self.target_entropy = target_entropy if target_entropy is not None \

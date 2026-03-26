@@ -308,27 +308,36 @@ def _select_action_batch(agent, algo_name, obs, device):
     return None, None
 
 
-def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes,
+def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unused,
                     num_envs, csv_writer, device):
     """
-    Train using 256 parallel envs in ONE continuous loop.
-    n_episodes = number of COMPLETED episodes to collect (not iterations).
+    Train using 256 parallel envs. Budget = total_steps batch steps.
+    All algorithms use the same budget for fair comparison.
+    Each completed episode is logged to CSV.
     """
+    total_steps = algo_cfg.get("total_steps", shared_cfg.get("total_steps", 20000))
     global_step = 0
+    completed = 0
+
+    obs, _ = env.reset()
+    obs = extract_obs(obs)
+
+    # Per-env episode tracking (shared by all algorithms)
+    ep_returns = torch.zeros(num_envs, device=device)
+    ep_lengths = torch.zeros(num_envs, device=device)
 
     # --- On-policy parallel algorithms (A2C, PPO) ---
     if algo_name in ("A2C", "PPO"):
         num_transitions = algo_cfg["num_transitions_per_env"]
-        obs, _ = env.reset()
-        obs = extract_obs(obs)
         n_obs = obs.shape[-1]
         action_type = algo_cfg.get("action_type", "continuous")
         actions_shape = (agent.num_of_action,) if action_type == "continuous" else (1,)
         agent._init_storage(num_envs, num_transitions, (n_obs,), actions_shape, device)
 
-        for iteration in tqdm(range(n_episodes), desc=f"Training {algo_name}", ncols=100):
-            ep_return = 0.0
+        n_iters = total_steps // num_transitions
+        pbar = tqdm(total=n_iters, desc=f"Training {algo_name}", ncols=100)
 
+        for iteration in range(n_iters):
             with torch.no_grad():
                 for _ in range(num_transitions):
                     actions = agent.act(obs)
@@ -342,33 +351,36 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes,
                     dones = terminated | truncated
                     agent.process_env_step(rewards, dones)
                     obs = next_obs
-                    ep_return += rewards.mean().item()
+
+                    # Track per-env episodes
+                    ep_returns += rewards
+                    ep_lengths += 1
+                    done_mask = dones.bool()
+                    if done_mask.any():
+                        done_idx = done_mask.nonzero(as_tuple=True)[0]
+                        for idx in done_idx:
+                            global_step_now = (iteration * num_transitions + _ + 1) * num_envs
+                            csv_writer.writerow({
+                                "episode": completed,
+                                "ep_return": ep_returns[idx].item(),
+                                "ep_length": int(ep_lengths[idx].item()),
+                                "global_step": global_step_now,
+                                "epsilon": 0.0,
+                            })
+                            completed += 1
+                        ep_returns[done_mask] = 0.0
+                        ep_lengths[done_mask] = 0.0
 
                 agent.compute_returns(obs)
 
             agent.update()
-            global_step += num_envs * num_transitions
+            pbar.update(1)
 
-            csv_writer.writerow({
-                "episode": iteration,
-                "ep_return": ep_return,
-                "ep_length": num_transitions,
-                "global_step": global_step,
-                "epsilon": 0.0,
-            })
+        pbar.close()
 
     # --- All other algorithms: single continuous loop ---
     else:
-        obs, _ = env.reset()
-        obs = extract_obs(obs)
-
-        # Per-env episode tracking
-        ep_returns = torch.zeros(num_envs, device=device)
-        ep_lengths = torch.zeros(num_envs, device=device)
-        completed = 0
-
         # Per-env storage for MC algorithms (REINFORCE, AC)
-        # Store obs/actions (detached), recompute log_probs on episode end
         if algo_name in ("MC_REINFORCE", "AC"):
             env_obs = [[] for _ in range(num_envs)]
             env_actions = [[] for _ in range(num_envs)]
@@ -377,9 +389,9 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes,
             update_every = 50
             agent.optimizer.zero_grad()
 
-        pbar = tqdm(total=n_episodes, desc=f"Training {algo_name}", ncols=100)
+        pbar = tqdm(total=total_steps, desc=f"Training {algo_name}", ncols=100)
 
-        while completed < n_episodes:
+        for step in range(total_steps):
             # --- Select actions ---
             env_action, extra = _select_action_batch(agent, algo_name, obs, device)
 
@@ -495,23 +507,20 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes,
 
             if done.any():
                 done_idx = done.nonzero(as_tuple=True)[0]
-                new_completed = 0
                 for idx in done_idx:
-                    if completed < n_episodes:
-                        csv_writer.writerow({
-                            "episode": completed,
-                            "ep_return": ep_returns[idx].item(),
-                            "ep_length": int(ep_lengths[idx].item()),
-                            "global_step": global_step,
-                            "epsilon": getattr(agent, 'epsilon', 0.0) or 0.0,
-                        })
-                        completed += 1
-                        new_completed += 1
+                    csv_writer.writerow({
+                        "episode": completed,
+                        "ep_return": ep_returns[idx].item(),
+                        "ep_length": int(ep_lengths[idx].item()),
+                        "global_step": global_step,
+                        "epsilon": getattr(agent, 'epsilon', 0.0) or 0.0,
+                    })
+                    completed += 1
                 ep_returns[done] = 0.0
                 ep_lengths[done] = 0.0
-                pbar.update(new_completed)
 
             obs = next_obs
+            pbar.update(1)
 
         pbar.close()
 
@@ -644,9 +653,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg,
             continue
 
         algo_cfg = config["algorithms"][algo_name]
-        n_episodes = algo_cfg.get("n_episodes", 1000)
+        t_steps = algo_cfg.get("total_steps", shared.get("total_steps", 20000))
         print(f"\n{'='*60}")
-        print(f"  Algorithm: {algo_name} ({num_envs} envs, {n_episodes} episodes)")
+        print(f"  Algorithm: {algo_name} ({num_envs} envs, {t_steps} batch steps)")
         print(f"{'='*60}")
 
         # Build agent
@@ -663,7 +672,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg,
                 "episode", "ep_return", "ep_length", "global_step", "epsilon"])
             writer.writeheader()
             train_algorithm(agent, env, algo_name, algo_cfg, shared,
-                            n_episodes, num_envs, writer, device)
+                            t_steps, num_envs, writer, device)
 
         # Save final model
         if algo_name == "Linear_Q":
