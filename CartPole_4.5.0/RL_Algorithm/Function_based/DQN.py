@@ -297,7 +297,8 @@ class DQN(OffPolicyAlgorithm):
             )  # (num_agents,)
 
             # --- Step all envs simultaneously ---
-            next_obs, reward, terminated, truncated, _ = env.step(scaled_actions)
+            # Isaac Lab expects (num_envs, action_dim) shape
+            next_obs, reward, terminated, truncated, _ = env.step(scaled_actions.unsqueeze(-1))
             if isinstance(next_obs, dict):
                 next_obs = next_obs["policy"]
 

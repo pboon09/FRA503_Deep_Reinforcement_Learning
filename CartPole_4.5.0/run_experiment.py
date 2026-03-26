@@ -345,11 +345,13 @@ def deploy(agent, env, algo_name, n_episodes, max_steps, csv_writer, device):
                     action = agent.scale_action(action_idx)
                     if torch.is_tensor(obs):
                         action = action.to(obs.device)
+                    action = action.reshape(1, -1)  # (1, 1) for Isaac Lab
                 elif algo_name == "DQN":
                     state = obs if obs.dim() >= 2 else obs.unsqueeze(0)
                     q_vals = agent.policy_net(state)
                     action_idx = q_vals.argmax(dim=1).item()
                     action = agent.scale_action(action_idx).to(device)
+                    action = action.reshape(1, -1)  # (1, 1) for Isaac Lab
                 elif algo_name == "MC_REINFORCE":
                     state = obs if obs.dim() >= 2 else obs.unsqueeze(0)
                     if agent.action_type == "continuous":
@@ -359,6 +361,7 @@ def deploy(agent, env, algo_name, n_episodes, max_steps, csv_writer, device):
                         logits = agent.policy_net(state)
                         action_idx = logits.argmax(dim=-1).item()
                         action = agent.scale_action(action_idx).to(device)
+                        action = action.reshape(1, -1)
                 elif algo_name in ("AC", "A2C", "PPO"):
                     state = obs if obs.dim() >= 2 else obs.unsqueeze(0)
                     action = agent.select_action(state)
@@ -368,6 +371,10 @@ def deploy(agent, env, algo_name, n_episodes, max_steps, csv_writer, device):
                     action = agent.select_action(obs, evaluate=True)
                 elif algo_name == "TD3":
                     action = agent.select_action(obs, add_noise=False)
+
+                # Ensure action is 2D: (num_envs, action_dim) for Isaac Lab
+                if action.dim() == 1:
+                    action = action.unsqueeze(-1)
 
                 next_obs, reward, terminated, truncated, info = env.step(action)
                 done = terminated | truncated
