@@ -1,28 +1,28 @@
 ============================================================
-Run started at 2026-03-26 14:42:42
-Suites: {'DEPLOY', 'PLOTS', 'TRAIN'}
-Algo envs: {'PPO': 256, 'AC': 32, 'MC_REINFORCE': 64, 'DQN': 32, 'Linear_Q': 32}
+Run started at 2026-03-26 17:09:04
+Suites: {'DEPLOY', 'TRAIN'}
+Algo envs: {'PPO': 256, 'AC': 8, 'MC_REINFORCE': 16, 'DQN': 32, 'Linear_Q': 32}
 ============================================================
 
-[TRAIN] DQN (num_envs=32) started at 2026-03-26 14:42:42
-[TRAIN] DQN finished at 2026-03-26 16:32:43 | elapsed 110.0 min | OK
+[TRAIN] MC_REINFORCE (num_envs=16) started at 2026-03-26 17:09:04
+[TRAIN] MC_REINFORCE finished at 2026-03-26 17:50:34 | elapsed 41.5 min | OK
 
-[TRAIN] MC_REINFORCE (num_envs=64) started at 2026-03-26 16:32:43
-[TRAIN] MC_REINFORCE finished at 2026-03-26 16:34:58 | elapsed 2.3 min | OK
+[TRAIN] DQN (num_envs=32) started at 2026-03-26 17:50:34
+[TRAIN] DQN finished at 2026-03-26 19:37:37 | elapsed 107.0 min | OK
 
-[TRAIN] AC (num_envs=32) started at 2026-03-26 16:34:58
-[TRAIN] AC finished at 2026-03-26 16:39:42 | elapsed 4.7 min | OK
+[TRAIN] AC (num_envs=8) started at 2026-03-26 19:37:37
+[TRAIN] AC finished at 2026-03-26 21:43:54 | elapsed 126.3 min | OK
 
-[DEPLOY] DQN started at 2026-03-26 16:39:42
-[DEPLOY] DQN finished at 2026-03-26 16:40:06 | elapsed 24.6 sec | OK
+[DEPLOY] MC_REINFORCE started at 2026-03-26 21:43:54
+[DEPLOY] MC_REINFORCE finished at 2026-03-26 21:44:26 | elapsed 31.7 sec | OK
 
-[DEPLOY] MC_REINFORCE started at 2026-03-26 16:40:06
-[DEPLOY] MC_REINFORCE finished at 2026-03-26 16:40:14 | elapsed 8.2 sec | OK
+[DEPLOY] DQN started at 2026-03-26 21:44:26
+[DEPLOY] DQN finished at 2026-03-26 21:44:59 | elapsed 32.9 sec | OK
 
-[DEPLOY] AC started at 2026-03-26 16:40:14
-[DEPLOY] AC finished at 2026-03-26 16:40:27 | elapsed 12.4 sec | OK
+[DEPLOY] AC started at 2026-03-26 21:44:59
+[DEPLOY] AC finished at 2026-03-26 21:45:31 | elapsed 31.6 sec | OK
 
 ============================================================
-All done at 2026-03-26 16:40:34
+All done at 2026-03-26 21:45:31
 ============================================================
 
