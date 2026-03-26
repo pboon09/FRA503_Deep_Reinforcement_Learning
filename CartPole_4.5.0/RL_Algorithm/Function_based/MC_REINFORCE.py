@@ -361,6 +361,7 @@ class MC_REINFORCE(BaseAlgorithm):
 
         # ----- Parallel-env path ----- #
         obs, _ = env.reset()  # (num_agents, obs_dim)
+        if isinstance(obs, dict): obs = obs["policy"]
         obs = obs.to(self.device)
 
         # Per-env episode storage
@@ -383,6 +384,7 @@ class MC_REINFORCE(BaseAlgorithm):
                 env_action = self._scale_action_batch(action)  # (N, 1)
 
             next_obs, reward, terminated, truncated, _ = env.step(env_action)
+            if isinstance(next_obs, dict): next_obs = next_obs["policy"]
             dones = terminated | truncated  # (N,)
 
             # Batch CPU transfer once

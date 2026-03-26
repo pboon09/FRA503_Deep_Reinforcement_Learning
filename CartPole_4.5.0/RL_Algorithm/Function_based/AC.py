@@ -380,6 +380,7 @@ class AC(OnPolicyAlgorithm):
 
         # ----- Parallel-env path ----- #
         obs, _ = env.reset()  # (num_agents, obs_dim)
+        if isinstance(obs, dict): obs = obs["policy"]
         obs = obs.to(self.device)
 
         # Per-env episode storage
@@ -404,6 +405,7 @@ class AC(OnPolicyAlgorithm):
                 action_env = action
 
             next_obs, reward, terminated, truncated, _ = env.step(action_env)
+            if isinstance(next_obs, dict): next_obs = next_obs["policy"]
             dones = terminated | truncated  # (N,)
 
             # Batch CPU transfer once

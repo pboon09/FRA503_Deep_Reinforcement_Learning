@@ -103,6 +103,13 @@ def make_env(task: str, env_cfg, num_envs: int = 1):
     return env
 
 
+def extract_obs(obs):
+    """Extract observation tensor from Isaac Lab obs (handles dict or tensor)."""
+    if isinstance(obs, dict):
+        return obs["policy"]
+    return obs
+
+
 def build_agent(algo_name: str, cfg: dict, shared: dict, device: torch.device):
     """Construct an agent from config."""
     action_range = shared["action_range"]
@@ -254,6 +261,7 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes,
     if algo_name in ("A2C", "PPO"):
         num_transitions = algo_cfg["num_transitions_per_env"]
         obs, _ = env.reset()
+        obs = extract_obs(obs)
         n_obs = obs.shape[-1]
         action_type = algo_cfg.get("action_type", "continuous")
         actions_shape = (agent.num_of_action,) if action_type == "continuous" else (1,)
@@ -271,6 +279,7 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes,
                     else:
                         env_actions = actions
                     next_obs, rewards, terminated, truncated, _ = env.step(env_actions)
+                    next_obs = extract_obs(next_obs)
                     dones = terminated | truncated
                     agent.process_env_step(rewards, dones)
                     obs = next_obs
@@ -332,6 +341,7 @@ def deploy(agent, env, algo_name, n_episodes, max_steps, csv_writer, device):
     print(f"\n  Deploying {algo_name} for {n_episodes} episodes...")
 
     obs, _ = env.reset()
+    obs = extract_obs(obs)
     num_envs = obs.shape[0]
     ep_returns = torch.zeros(num_envs, device=device)
     ep_lengths = torch.zeros(num_envs, device=device)
@@ -383,6 +393,7 @@ def deploy(agent, env, algo_name, n_episodes, max_steps, csv_writer, device):
                 action = action.unsqueeze(-1)
 
             next_obs, reward, terminated, truncated, info = env.step(action)
+            next_obs = extract_obs(next_obs)
             done = (terminated | truncated).bool()
 
             ep_returns += reward

@@ -346,7 +346,8 @@ class TD3(OffPolicyAlgorithm):
             Tuple[float, int]: (avg_episode_return, avg_episode_length)
         """
         # ========= put your code here ========= #
-        obs, _ = env.reset()  # (num_agents, obs_dim)
+        obs, _ = env.reset()
+        if isinstance(obs, dict): obs = obs["policy"]
         ep_returns = torch.zeros(num_agents, device=self.device)
         ep_lengths = torch.zeros(num_agents, device=self.device)
         completed_returns = []
@@ -357,6 +358,7 @@ class TD3(OffPolicyAlgorithm):
             scaled_action = self.select_action(obs)  # (num_agents, action_dim)
 
             next_obs, reward, terminated, truncated, _ = env.step(scaled_action)
+            if isinstance(next_obs, dict): next_obs = next_obs["policy"]
             dones = (terminated | truncated).float()
 
             # Convert scaled action back to raw [-1,1] for replay buffer storage

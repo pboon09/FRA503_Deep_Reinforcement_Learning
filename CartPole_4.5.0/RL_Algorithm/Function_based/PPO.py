@@ -328,10 +328,12 @@ class PPO(OnPolicyAlgorithm):
             actions_shape = (1,)
 
         obs, _ = env.reset()
+        if isinstance(obs, dict): obs = obs["policy"]
         n_obs = obs.shape[1]
         self._init_storage(num_envs, num_transitions_per_env, (n_obs,), actions_shape, self.device)
 
         obs, _ = env.reset()
+        if isinstance(obs, dict): obs = obs["policy"]
 
         for episode in range(max_episodes):
 
@@ -344,6 +346,7 @@ class PPO(OnPolicyAlgorithm):
                     else:
                         action_clipped = action
                     obs, rewards, dones, truncated, _ = env.step(action_clipped)
+                    if isinstance(obs, dict): obs = obs["policy"]
 
                     dones = dones | truncated
                     self.process_env_step(rewards, dones)
