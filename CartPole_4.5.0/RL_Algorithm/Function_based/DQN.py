@@ -304,36 +304,35 @@ class DQN(OffPolicyAlgorithm):
 
             done = terminated | truncated  # (num_agents,) bool tensor
 
+            # --- Single batch CPU transfer (avoid per-env .item() GPU syncs) ---
+            act_cpu = action_indices.cpu().numpy()
+            rew_cpu = reward.cpu().numpy()
+            term_cpu = terminated.cpu().numpy()
+            done_cpu = done.cpu().numpy()
+
             # --- Store transitions for ALL envs in replay buffer ---
             for i in range(num_agents):
-                obs_i = obs[i]                  # (obs_dim,) tensor
-                act_i = action_indices[i].item()
-                rew_i = reward[i].item()
-                term_i = terminated[i].item()
-                done_i = done[i].item()
-
-                # Store next_state as None if terminal (for proper Bellman backup)
-                if done_i:
-                    self.store_transition(obs_i, act_i, rew_i, None, term_i)
+                if done_cpu[i]:
+                    self.store_transition(obs[i], int(act_cpu[i]), float(rew_cpu[i]), None, bool(term_cpu[i]))
                 else:
-                    self.store_transition(obs_i, act_i, rew_i, next_obs[i], term_i)
+                    self.store_transition(obs[i], int(act_cpu[i]), float(rew_cpu[i]), next_obs[i], bool(term_cpu[i]))
 
             # --- Update policy and target networks ---
             self.update_policy()
             self.update_target_networks()
 
-            # --- Accumulate per-env returns and lengths ---
+            # --- Track per-env returns (GPU) ---
             env_returns += reward
             env_lengths += 1
 
-            # --- Log completed episodes and reset trackers ---
-            done_cpu = done.cpu()
-            for i in range(num_agents):
-                if done_cpu[i]:
-                    completed_returns.append(env_returns[i].item())
-                    completed_lengths.append(env_lengths[i].item())
-                    env_returns[i] = 0.0
-                    env_lengths[i] = 0
+            # --- Log completed episodes (vectorized) ---
+            done_mask = done.bool()
+            if done_mask.any():
+                done_idx = done_mask.nonzero(as_tuple=True)[0]
+                completed_returns.extend(env_returns[done_idx].cpu().tolist())
+                completed_lengths.extend(env_lengths[done_idx].cpu().tolist())
+                env_returns[done_mask] = 0.0
+                env_lengths[done_mask] = 0
 
             # Isaac Lab auto-resets; next_obs is already the new obs
             obs = next_obs

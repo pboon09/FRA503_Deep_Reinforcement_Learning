@@ -406,13 +406,16 @@ class AC(OnPolicyAlgorithm):
             next_obs, reward, terminated, truncated, _ = env.step(action_env)
             dones = terminated | truncated  # (N,)
 
+            # Batch CPU transfer once
+            done_cpu = dones.cpu().numpy()
+
             # Store per-env data and handle episode boundaries
             for i in range(num_agents):
                 env_log_probs[i].append(log_prob[i])
                 env_values[i].append(value[i].squeeze())
                 env_rewards_list[i].append(reward[i])
 
-                if dones[i]:
+                if done_cpu[i]:
                     # Episode completed for env i
                     if len(env_rewards_list[i]) > 1:
                         rewards_t = torch.stack(env_rewards_list[i])

@@ -363,24 +363,27 @@ class TD3(OffPolicyAlgorithm):
             action_min, action_max = self.action_range
             raw_action = (scaled_action - action_min) / (action_max - action_min) * 2.0 - 1.0
 
+            # Single batch CPU transfer (avoid per-env .item() GPU syncs)
+            rew_cpu = reward.cpu().numpy()
+            done_cpu = dones.cpu().numpy()
+
             # Store all transitions
             for i in range(num_agents):
                 self.store_transition(
-                    obs[i], raw_action[i], reward[i].item(),
-                    next_obs[i], dones[i].item()
+                    obs[i], raw_action[i], float(rew_cpu[i]),
+                    next_obs[i], float(done_cpu[i])
                 )
 
-            # Accumulate per-env episode returns and lengths
+            # Accumulate per-env episode returns and lengths (GPU)
             ep_returns += reward
             ep_lengths += 1
 
-            # Track completed episodes (auto-reset envs)
+            # Track completed episodes (vectorized)
             done_mask = dones.bool().squeeze()
             if done_mask.any():
-                done_indices = done_mask.nonzero(as_tuple=True)[0]
-                for idx in done_indices:
-                    completed_returns.append(ep_returns[idx].item())
-                    completed_lengths.append(ep_lengths[idx].item())
+                done_idx = done_mask.nonzero(as_tuple=True)[0]
+                completed_returns.extend(ep_returns[done_idx].cpu().tolist())
+                completed_lengths.extend(ep_lengths[done_idx].cpu().tolist())
                 ep_returns[done_mask] = 0.0
                 ep_lengths[done_mask] = 0.0
 

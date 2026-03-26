@@ -385,12 +385,16 @@ class MC_REINFORCE(BaseAlgorithm):
             next_obs, reward, terminated, truncated, _ = env.step(env_action)
             dones = terminated | truncated  # (N,)
 
+            # Batch CPU transfer once
+            rew_cpu = reward.cpu().numpy()
+            done_cpu = dones.cpu().numpy()
+
             # Store per-env data and handle episode boundaries
             for i in range(num_agents):
                 env_log_probs[i].append(log_prob[i])
-                env_rewards[i].append(reward[i].item())
+                env_rewards[i].append(float(rew_cpu[i]))
 
-                if dones[i]:
+                if done_cpu[i]:
                     # Episode completed for env i
                     if len(env_rewards[i]) > 1:
                         returns = self.calculate_stepwise_returns(env_rewards[i])

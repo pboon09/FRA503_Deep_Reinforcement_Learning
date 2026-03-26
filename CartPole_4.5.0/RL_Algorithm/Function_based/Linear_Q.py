@@ -44,6 +44,10 @@ class Linear_QN(BaseAlgorithm):
         # Shape: (obs_feature_dim, num_of_action)
         self.w = np.zeros((4, num_of_action))
 
+        # GPU version of weights (created lazily in learn())
+        self._w_gpu = None
+        self._device = None
+
     # ------------------------------------------------------------------ #
     # Linear Q-value estimation                                           #
     # ------------------------------------------------------------------ #
@@ -120,88 +124,89 @@ class Linear_QN(BaseAlgorithm):
     def learn(self, env, max_steps: int, num_agents: int = 256):
         """
         Train the agent across parallel vectorized environments.
-
-        Isaac Lab auto-resets envs when done. The returned next_obs is
-        already the reset observation, so we never break on done -- we
-        simply keep stepping for max_steps and track per-env returns.
+        Uses pure GPU torch operations to avoid CPU transfers.
 
         Args:
-            env: Vectorized Isaac Lab environment with ``num_agents`` sub-envs.
-            max_steps (int): Total number of environment steps to take.
-            num_agents (int): Number of parallel environments (default 256).
+            env: Vectorized Isaac Lab environment.
+            max_steps (int): Steps per iteration.
+            num_agents (int): Number of parallel environments.
 
         Returns:
             Tuple[float, float]: (mean_episode_return, mean_episode_length)
-                over all episodes that completed during the run.
         """
         # ========= put your code here ========= #
         action_min, action_max = self.action_range
 
-        # --- Reset env and get initial obs (num_agents, obs_dim) ---
         obs, _ = env.reset()
         if isinstance(obs, dict):
             obs = obs["policy"]
-        obs_np = obs.cpu().numpy()  # (num_agents, 4)
+        device = obs.device
 
-        # Per-env tracking
-        env_returns = np.zeros(num_agents)
-        env_lengths = np.zeros(num_agents, dtype=int)
+        # Sync numpy weights to GPU tensor
+        if self._w_gpu is None or self._device != device:
+            self._device = device
+        self._w_gpu = torch.tensor(self.w, dtype=torch.float32, device=device)
+
+        # Per-env tracking (all on GPU)
+        env_returns = torch.zeros(num_agents, device=device)
+        env_lengths = torch.zeros(num_agents, device=device)
         completed_returns = []
         completed_lengths = []
 
-        # Number of envs to learn from each step (subset for speed)
-        learn_batch = min(16, num_agents)
+        for step in range(max_steps):
+            # --- Vectorized Q-values on GPU: (N, 4) @ (4, A) -> (N, A) ---
+            all_q = obs @ self._w_gpu  # (num_agents, num_of_action)
+            greedy_actions = all_q.argmax(dim=1)  # (num_agents,)
 
-        for timestep in range(1, max_steps + 1):
-            # --- Vectorized action selection (epsilon-greedy) ---
-            # Q-values for all envs: obs_np @ self.w -> (num_agents, num_actions)
-            all_q = obs_np @ self.w  # (num_agents, num_of_action)
-            greedy_actions = np.argmax(all_q, axis=1)  # (num_agents,)
-            random_actions = np.random.randint(0, self.num_of_action, size=num_agents)
-            explore_mask = np.random.random(num_agents) < self.epsilon
-            action_indices = np.where(explore_mask, random_actions, greedy_actions)
+            # Epsilon-greedy
+            random_actions = torch.randint(0, self.num_of_action, (num_agents,), device=device)
+            explore_mask = torch.rand(num_agents, device=device) < self.epsilon
+            action_indices = torch.where(explore_mask, random_actions, greedy_actions)
 
-            # --- Build scaled action tensor ---
-            scaled_np = action_min + (action_indices / (self.num_of_action - 1)) * (action_max - action_min)
-            scaled_actions = torch.tensor(scaled_np, dtype=torch.float32, device=obs.device)
+            # Scale actions: (num_agents,)
+            scaled = action_min + (action_indices.float() / (self.num_of_action - 1)) * (action_max - action_min)
 
-            # --- Step all envs (Isaac Lab expects (num_envs, action_dim)) ---
-            next_obs, reward, terminated, truncated, _ = env.step(scaled_actions.unsqueeze(-1))
+            # Step env: (num_agents, 1) for Isaac Lab
+            next_obs, reward, terminated, truncated, _ = env.step(scaled.unsqueeze(-1))
             if isinstance(next_obs, dict):
                 next_obs = next_obs["policy"]
+            done = (terminated | truncated).bool()
 
-            next_obs_np = next_obs.cpu().numpy()
-            reward_np = reward.cpu().numpy().flatten()
-            terminated_np = terminated.cpu().numpy().flatten()
-            truncated_np = truncated.cpu().numpy().flatten()
-            done_np = terminated_np | truncated_np
+            # --- Vectorized TD update on GPU ---
+            # Q(s, a_taken) for all envs
+            next_q = next_obs @ self._w_gpu  # (N, A)
+            next_max_q = next_q.max(dim=1).values  # (N,)
+            current_q = all_q.gather(1, action_indices.unsqueeze(1)).squeeze(1)  # (N,)
+            td_target = reward + self.discount_factor * next_max_q * (~terminated).float()
+            td_error = (td_target - current_q).clamp(-5.0, 5.0)  # (N,)
 
-            # --- Update weights from a random subset of envs (for speed) ---
-            batch_idx = np.random.choice(num_agents, learn_batch, replace=False)
-            for i in batch_idx:
-                next_action = int(np.argmax(self.q(next_obs_np[i])))
-                self.update(
-                    obs_np[i], action_indices[i], reward_np[i],
-                    next_obs_np[i], next_action, bool(terminated_np[i]),
-                )
+            # Batch weight update: for each action, accumulate gradients
+            for a in range(self.num_of_action):
+                mask = (action_indices == a)
+                if mask.any():
+                    # grad = lr * td_error * obs for envs that took action a
+                    grads = self.lr * td_error[mask].unsqueeze(1) * obs[mask]  # (count, 4)
+                    self._w_gpu[:, a] += grads.mean(dim=0)  # average over envs
 
-            # --- Track per-env returns ---
-            env_returns += reward_np
+            # Track returns
+            env_returns += reward
             env_lengths += 1
-            done_mask = done_np.astype(bool)
-            if done_mask.any():
-                completed_returns.extend(env_returns[done_mask].tolist())
-                completed_lengths.extend(env_lengths[done_mask].tolist())
-                env_returns[done_mask] = 0.0
-                env_lengths[done_mask] = 0
+            if done.any():
+                done_idx = done.nonzero(as_tuple=True)[0]
+                completed_returns.extend(env_returns[done_idx].cpu().tolist())
+                completed_lengths.extend(env_lengths[done_idx].cpu().tolist())
+                env_returns[done] = 0.0
+                env_lengths[done] = 0.0
 
-            obs_np = next_obs_np
             obs = next_obs
             self.decay_epsilon()
 
+        # Sync GPU weights back to numpy
+        self.w = self._w_gpu.cpu().numpy()
+
         if completed_returns:
             return float(np.mean(completed_returns)), float(np.mean(completed_lengths))
-        return float(np.mean(env_returns)), float(np.mean(env_lengths))
+        return float(env_returns.mean().item()), float(env_lengths.mean().item())
         # ====================================== #
 
     # ------------------------------------------------------------------ #
