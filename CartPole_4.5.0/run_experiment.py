@@ -249,12 +249,71 @@ def build_agent(algo_name: str, cfg: dict, shared: dict, device: torch.device):
 
 # ------------------------------------------------------------------ #
 # Unified training loop (all algos use 256 parallel envs)              #
+# ONE continuous loop - no env.reset() per iteration                   #
 # ------------------------------------------------------------------ #
+
+def _select_action_batch(agent, algo_name, obs, device):
+    """Select actions for all 256 envs in one batch call."""
+    if algo_name == "Linear_Q":
+        if hasattr(agent, '_w_gpu') and agent._w_gpu is not None:
+            all_q = obs @ agent._w_gpu
+        else:
+            agent._w_gpu = torch.tensor(agent.w, dtype=torch.float32, device=device)
+            agent._device = device
+            all_q = obs @ agent._w_gpu
+        greedy = all_q.argmax(dim=1)
+        rand = torch.randint(0, agent.num_of_action, (obs.shape[0],), device=device)
+        mask = torch.rand(obs.shape[0], device=device) < agent.epsilon
+        indices = torch.where(mask, rand, greedy)
+        a_min, a_max = agent.action_range
+        action = a_min + (indices.float() / (agent.num_of_action - 1)) * (a_max - a_min)
+        return action.unsqueeze(-1), indices
+
+    elif algo_name == "DQN":
+        with torch.no_grad():
+            q = agent.policy_net(obs)
+            greedy = q.argmax(dim=1)
+        rand = torch.randint(0, agent.num_of_action, (obs.shape[0],), device=device)
+        mask = torch.rand(obs.shape[0], device=device) < agent.epsilon
+        indices = torch.where(mask, rand, greedy)
+        a_min, a_max = agent.action_range
+        action = a_min + (indices.float() / (agent.num_of_action - 1)) * (a_max - a_min)
+        return action.unsqueeze(-1), indices
+
+    elif algo_name == "MC_REINFORCE":
+        dist = agent._get_distribution(obs)
+        action, log_prob = agent._sample_action(dist)
+        if agent.action_type == "continuous":
+            env_action = action.clamp(agent.action_range[0], agent.action_range[1])
+        else:
+            env_action = agent._scale_action_batch(action)
+        return env_action, (action, log_prob)
+
+    elif algo_name == "AC":
+        action = agent.policy.act(obs)
+        value = agent.policy.evaluate(obs)
+        log_prob = agent.policy.get_actions_log_prob(action)
+        if agent.action_type == "continuous":
+            env_action = action.clamp(agent.action_range[0], agent.action_range[1])
+        else:
+            env_action = action
+        return env_action, (action, log_prob, value)
+
+    elif algo_name == "SAC":
+        return agent.select_action(obs), None
+
+    elif algo_name == "TD3":
+        return agent.select_action(obs), None
+
+    return None, None
+
 
 def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes,
                     num_envs, csv_writer, device):
-    """Train any algorithm using 256 parallel envs."""
-    max_steps = algo_cfg.get("max_steps", shared_cfg.get("max_steps", 200))
+    """
+    Train using 256 parallel envs in ONE continuous loop.
+    n_episodes = number of COMPLETED episodes to collect (not iterations).
+    """
     global_step = 0
 
     # --- On-policy parallel algorithms (A2C, PPO) ---
@@ -267,10 +326,10 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes,
         actions_shape = (agent.num_of_action,) if action_type == "continuous" else (1,)
         agent._init_storage(num_envs, num_transitions, (n_obs,), actions_shape, device)
 
-        for episode in tqdm(range(n_episodes), desc=f"Training {algo_name}", ncols=100):
+        for iteration in tqdm(range(n_episodes), desc=f"Training {algo_name}", ncols=100):
             ep_return = 0.0
 
-            with torch.inference_mode():
+            with torch.no_grad():
                 for _ in range(num_transitions):
                     actions = agent.act(obs)
                     action_min, action_max = agent.action_range
@@ -291,49 +350,173 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes,
             global_step += num_envs * num_transitions
 
             csv_writer.writerow({
-                "episode": episode,
+                "episode": iteration,
                 "ep_return": ep_return,
                 "ep_length": num_transitions,
                 "global_step": global_step,
                 "epsilon": 0.0,
             })
 
-    # --- All other algorithms (vectorized learn()) ---
+    # --- All other algorithms: single continuous loop ---
     else:
-        for episode in tqdm(range(n_episodes), desc=f"Training {algo_name}", ncols=100):
+        obs, _ = env.reset()
+        obs = extract_obs(obs)
+
+        # Per-env episode tracking
+        ep_returns = torch.zeros(num_envs, device=device)
+        ep_lengths = torch.zeros(num_envs, device=device)
+        completed = 0
+
+        # Per-env storage for MC algorithms (REINFORCE, AC)
+        if algo_name in ("MC_REINFORCE", "AC"):
+            env_log_probs = [[] for _ in range(num_envs)]
+            env_rewards = [[] for _ in range(num_envs)]
+            if algo_name == "AC":
+                env_values = [[] for _ in range(num_envs)]
+            total_loss = 0.0
+            num_updates = 0
+            update_every = 50  # gradient step every N completed episodes
+
+        pbar = tqdm(total=n_episodes, desc=f"Training {algo_name}", ncols=100)
+
+        while completed < n_episodes:
+            # --- Select actions ---
+            env_action, extra = _select_action_batch(agent, algo_name, obs, device)
+
+            # --- Step all 256 envs ---
+            next_obs, reward, terminated, truncated, _ = env.step(env_action)
+            next_obs = extract_obs(next_obs)
+            done = (terminated | truncated).bool()
+
+            # --- Algorithm-specific per-step logic ---
             if algo_name == "Linear_Q":
-                ep_return, timestep = agent.learn(env, max_steps=max_steps,
-                                                   num_agents=num_envs)
+                # Vectorized TD update on GPU
+                indices = extra  # action indices
+                next_q = next_obs @ agent._w_gpu
+                next_max = next_q.max(dim=1).values
+                cur_q = (obs @ agent._w_gpu).gather(1, indices.unsqueeze(1)).squeeze(1)
+                td_target = reward + agent.discount_factor * next_max * (~terminated).float()
+                td_error = (td_target - cur_q).clamp(-5.0, 5.0)
+                for a in range(agent.num_of_action):
+                    mask = (indices == a)
+                    if mask.any():
+                        grads = agent.lr * td_error[mask].unsqueeze(1) * obs[mask]
+                        agent._w_gpu[:, a] += grads.mean(dim=0)
+                agent.decay_epsilon()
+
             elif algo_name == "DQN":
-                ep_return, timestep = agent.learn(env, num_agents=num_envs,
-                                                   max_steps=max_steps)
+                indices = extra
+                rew_cpu = reward.cpu().numpy()
+                term_cpu = terminated.cpu().numpy()
+                done_cpu = done.cpu().numpy()
+                for i in range(num_envs):
+                    ns = None if done_cpu[i] else next_obs[i]
+                    agent.store_transition(obs[i], int(indices[i].item()), float(rew_cpu[i]),
+                                           ns, bool(term_cpu[i]))
+                agent.update_policy()
+                agent.update_target_networks()
+                agent.decay_epsilon()
+
             elif algo_name == "MC_REINFORCE":
-                result = agent.learn(env, num_agents=num_envs,
-                                     max_steps=max_steps)
-                ep_return = result[0]
-                timestep = result[2] if len(result) > 2 and isinstance(result[2], (int, float)) else max_steps
+                action, log_prob = extra
+                rew_cpu = reward.cpu().numpy()
+                done_cpu = done.cpu().numpy()
+                for i in range(num_envs):
+                    env_log_probs[i].append(log_prob[i])
+                    env_rewards[i].append(float(rew_cpu[i]))
+                    if done_cpu[i] and len(env_rewards[i]) > 1:
+                        returns = agent.calculate_stepwise_returns(env_rewards[i])
+                        lp = torch.stack(env_log_probs[i])
+                        loss = agent.calculate_loss(returns, lp)
+                        total_loss += loss
+                        num_updates += 1
+                    if done_cpu[i]:
+                        env_log_probs[i] = []
+                        env_rewards[i] = []
+                if num_updates >= update_every:
+                    avg_loss = total_loss / num_updates
+                    agent.optimizer.zero_grad()
+                    avg_loss.backward()
+                    agent.optimizer.step()
+                    total_loss = 0.0
+                    num_updates = 0
+
             elif algo_name == "AC":
-                result = agent.learn(env, max_steps=max_steps,
-                                     num_agents=num_envs)
-                ep_return = result[0]
-                timestep = result[2] if len(result) > 2 else max_steps
+                action, log_prob, value = extra
+                done_cpu = done.cpu().numpy()
+                for i in range(num_envs):
+                    env_log_probs[i].append(log_prob[i])
+                    env_values[i].append(value[i].squeeze())
+                    env_rewards[i].append(reward[i])
+                    if done_cpu[i] and len(env_rewards[i]) > 1:
+                        rewards_t = torch.stack(env_rewards[i])
+                        returns = agent.compute_returns(rewards_t)
+                        lp = torch.stack(env_log_probs[i])
+                        vals = torch.stack(env_values[i])
+                        al, cl = agent.calculate_loss(lp, vals, returns)
+                        loss = al + agent.value_loss_coef * cl
+                        total_loss += loss
+                        num_updates += 1
+                    if done_cpu[i]:
+                        env_log_probs[i] = []
+                        env_values[i] = []
+                        env_rewards[i] = []
+                if num_updates >= update_every:
+                    avg_loss = total_loss / num_updates
+                    agent.optimizer.zero_grad()
+                    avg_loss.backward()
+                    torch.nn.utils.clip_grad_norm_(agent.policy.parameters(), agent.max_grad_norm)
+                    agent.optimizer.step()
+                    total_loss = 0.0
+                    num_updates = 0
+
             elif algo_name in ("SAC", "TD3"):
-                ep_return, timestep = agent.learn(env, num_agents=num_envs,
-                                                   max_steps=max_steps)
+                a_min, a_max = agent.action_range
+                raw = (env_action - a_min) / (a_max - a_min) * 2.0 - 1.0
+                rew_cpu = reward.cpu().numpy()
+                done_cpu = done.float().cpu().numpy()
+                for i in range(num_envs):
+                    agent.store_transition(obs[i], raw[i], float(rew_cpu[i]),
+                                           next_obs[i], float(done_cpu[i]))
+                agent.update_policy()
 
-            global_step += num_envs * timestep
-            epsilon = getattr(agent, 'epsilon', 0.0) or 0.0
+            # --- Track completed episodes ---
+            ep_returns += reward
+            ep_lengths += 1
+            global_step += num_envs
 
-            csv_writer.writerow({
-                "episode": episode,
-                "ep_return": ep_return,
-                "ep_length": timestep,
-                "global_step": global_step,
-                "epsilon": epsilon,
-            })
+            if done.any():
+                done_idx = done.nonzero(as_tuple=True)[0]
+                new_completed = 0
+                for idx in done_idx:
+                    if completed < n_episodes:
+                        csv_writer.writerow({
+                            "episode": completed,
+                            "ep_return": ep_returns[idx].item(),
+                            "ep_length": int(ep_lengths[idx].item()),
+                            "global_step": global_step,
+                            "epsilon": getattr(agent, 'epsilon', 0.0) or 0.0,
+                        })
+                        completed += 1
+                        new_completed += 1
+                ep_returns[done] = 0.0
+                ep_lengths[done] = 0.0
+                pbar.update(new_completed)
 
-            # # Live plot (commented out)
-            # agent.plot_durations(timestep)
+            obs = next_obs
+
+        pbar.close()
+
+        # Final gradient step for MC algorithms
+        if algo_name in ("MC_REINFORCE", "AC") and num_updates > 0:
+            avg_loss = total_loss / num_updates
+            agent.optimizer.zero_grad()
+            avg_loss.backward()
+            agent.optimizer.step()
+
+        # Sync Linear_Q GPU weights back to numpy
+        if algo_name == "Linear_Q":
+            agent.w = agent._w_gpu.cpu().numpy()
 
 
 def deploy(agent, env, algo_name, n_episodes, max_steps, csv_writer, device):

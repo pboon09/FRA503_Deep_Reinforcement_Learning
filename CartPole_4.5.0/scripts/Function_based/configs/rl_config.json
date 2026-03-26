@@ -7,17 +7,16 @@
     },
     "algorithms": {
         "Linear_Q": {
-            "n_episodes": 200,
+            "n_episodes": 5000,
             "num_of_action": 11,
             "learning_rate": 0.01,
             "lr_decay": 0.9995,
             "initial_epsilon": 1.0,
             "epsilon_decay": 2e-4,
-            "final_epsilon": 0.01,
-            "max_steps": 200
+            "final_epsilon": 0.01
         },
         "DQN": {
-            "n_episodes": 100,
+            "n_episodes": 5000,
             "num_of_action": 11,
             "hidden_dim": 256,
             "dropout": 0.1,
@@ -27,20 +26,18 @@
             "epsilon_decay": 5e-4,
             "final_epsilon": 0.01,
             "buffer_size": 1000000,
-            "batch_size": 256,
-            "max_steps": 200
+            "batch_size": 256
         },
         "MC_REINFORCE": {
-            "n_episodes": 200,
+            "n_episodes": 5000,
             "num_of_action": 1,
             "hidden_dim": 256,
             "dropout": 0.1,
             "action_type": "continuous",
-            "learning_rate": 0.001,
-            "max_steps": 600
+            "learning_rate": 0.001
         },
         "AC": {
-            "n_episodes": 1000,
+            "n_episodes": 5000,
             "num_of_action": 1,
             "hidden_dims": [256, 256],
             "activation": "elu",
@@ -50,8 +47,7 @@
             "value_loss_coef": 0.5,
             "entropy_coef": 0.01,
             "max_grad_norm": 0.5,
-            "num_transitions_per_env": 20,
-            "max_steps": 20
+            "num_transitions_per_env": 20
         },
         "A2C": {
             "n_episodes": 1000,
@@ -85,7 +81,7 @@
             "desired_kl": 0.0
         },
         "SAC": {
-            "n_episodes": 100,
+            "n_episodes": 5000,
             "num_of_action": 1,
             "hidden_dim": 256,
             "learning_rate": 0.001,
@@ -95,11 +91,10 @@
             "batch_size": 512,
             "init_alpha": 0.05,
             "auto_alpha": true,
-            "target_entropy": null,
-            "max_steps": 200
+            "target_entropy": null
         },
         "TD3": {
-            "n_episodes": 100,
+            "n_episodes": 5000,
             "num_of_action": 1,
             "hidden_dim": 256,
             "learning_rate": 0.0005,
@@ -109,8 +104,7 @@
             "exploration_noise": 0.1,
             "target_noise": 0.2,
             "target_noise_clip": 0.5,
-            "policy_update_freq": 2,
-            "max_steps": 200
+            "policy_update_freq": 2
         }
     }
 }

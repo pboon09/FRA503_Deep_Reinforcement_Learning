@@ -263,7 +263,7 @@ class PPO(OnPolicyAlgorithm):
 
         # Adaptive learning rate based on KL divergence
         if self.desired_kl is not None and self.desired_kl > 0.0:
-            with torch.inference_mode():
+            with torch.no_grad():
                 obs_all = self.storage.observations.flatten(0, 1)
                 self.policy._update_distribution(obs_all)
                 new_mu = self.policy.action_mean
@@ -337,7 +337,7 @@ class PPO(OnPolicyAlgorithm):
 
         for episode in range(max_episodes):
 
-            with torch.inference_mode():
+            with torch.no_grad():
                 for _ in range(num_transitions_per_env):
                     action = self.act(obs)
 
