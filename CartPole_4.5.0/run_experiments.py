@@ -13,7 +13,7 @@ TIMING_LOG = os.path.join(ROOT, "experiments", "timing_log.txt")
 
 TASK = "Stabilize-Isaac-Cartpole-v0"
 ALL_ALGOS = ["Linear_Q", "DQN", "MC_REINFORCE", "AC", "PPO"]
-ALGO_ENVS = {"PPO": 256, "AC": 8, "MC_REINFORCE": 8, "DQN": 32, "Linear_Q": 32}
+ALGO_ENVS = {"PPO": 256, "AC": 32, "MC_REINFORCE": 64, "DQN": 32, "Linear_Q": 32}
 
 
 def log_timing(msg):
@@ -66,6 +66,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("suites", nargs="*", default=["ALL"],
                         help="ALL, train, deploy, plots")
+    parser.add_argument("--algos", nargs="*", default=None,
+                        help="Run only these algorithms, e.g. --algos DQN MC_REINFORCE AC")
     args = parser.parse_args()
     run = set(s.upper() for s in args.suites)
 
@@ -84,12 +86,14 @@ def main():
     log_timing(f"{'='*60}")
     log_timing("")
 
+    algos = args.algos if args.algos else ALL_ALGOS
+
     if "TRAIN" in run:
-        for algo in ALL_ALGOS:
+        for algo in algos:
             train(algo)
 
     if "DEPLOY" in run:
-        for algo in ALL_ALGOS:
+        for algo in algos:
             evaluate(algo)
 
     if "PLOTS" in run:

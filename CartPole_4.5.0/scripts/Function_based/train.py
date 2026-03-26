@@ -115,6 +115,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             learning_rate=algo_cfg["learning_rate"], discount_factor=shared["discount_factor"],
             entropy_coef=algo_cfg.get("entropy_coef", 0.01),
             num_epochs=algo_cfg.get("num_epochs", 1),
+            value_loss_coef=algo_cfg.get("value_loss_coef", 0.5),
         )
     elif Algorithm_name == "AC":
         from RL_Algorithm.Function_based.AC import AC

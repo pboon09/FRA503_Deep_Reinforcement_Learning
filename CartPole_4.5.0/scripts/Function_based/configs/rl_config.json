@@ -18,14 +18,14 @@
             "num_of_action": 11,
             "hidden_dim": 128,
             "dropout": 0.0,
-            "learning_rate": 0.0003,
-            "tau": 0.001,
+            "learning_rate": 0.0001,
+            "tau": 0.005,
             "initial_epsilon": 1.0,
             "epsilon_decay": 0.0000048,
             "final_epsilon": 0.04,
-            "buffer_size": 500000,
+            "buffer_size": 1000000,
             "batch_size": 128,
-            "learning_starts": 5000
+            "learning_starts": 10000
         },
         "MC_REINFORCE": {
             "num_of_action": 1,
@@ -35,7 +35,8 @@
             "learning_rate": 0.0003,
             "rollout_steps": 1024,
             "entropy_coef": 0.01,
-            "num_epochs": 1
+            "num_epochs": 4,
+            "value_loss_coef": 0.5
         },
         "AC": {
             "num_of_action": 1,
@@ -47,7 +48,7 @@
             "value_loss_coef": 0.5,
             "entropy_coef": 0.01,
             "max_grad_norm": 0.5,
-            "rollout_steps": 16,
+            "rollout_steps": 64,
             "num_epochs": 1
         },
         "PPO": {

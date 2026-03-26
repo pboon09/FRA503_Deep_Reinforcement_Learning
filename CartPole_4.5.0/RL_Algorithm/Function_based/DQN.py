@@ -115,7 +115,7 @@ class DQN(OffPolicyAlgorithm):
         loss = self.calculate_loss(*sample)
         self.optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=10.0)
+        torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=1.0)
         self.optimizer.step()
 
     def update_target_networks(self):
@@ -184,8 +184,7 @@ class DQN(OffPolicyAlgorithm):
                 self.decay_epsilon()
 
             if global_step >= self.learning_starts:
-                for _ in range(4):
-                    self.update_policy()
+                self.update_policy()
                 self.update_target_networks()
             state = next_state
 

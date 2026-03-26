@@ -15,10 +15,8 @@ class MC_REINFORCE_network(nn.Module):
         self.network = nn.Sequential(
             nn.Linear(n_observations, hidden_size),
             nn.ReLU(),
-            nn.Dropout(dropout),
             nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),
-            nn.Dropout(dropout),
             nn.Linear(hidden_size, n_actions),
         )
         if self.action_type == "continuous":
@@ -42,16 +40,29 @@ class MC_REINFORCE(BaseAlgorithm):
             discount_factor: float = None,
             entropy_coef: float = 0.01,
             num_epochs: int = 5,
+            value_loss_coef: float = 0.5,
     ) -> None:
         assert action_type in ("discrete", "continuous")
         self.action_type = action_type
         self.LR = learning_rate
         self.entropy_coef = entropy_coef
         self.num_epochs = num_epochs
+        self.value_loss_coef = value_loss_coef
         self.policy_net = MC_REINFORCE_network(
             n_observations, hidden_dim, num_of_action, dropout, action_type
         ).to(device)
-        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=learning_rate)
+        # Value baseline network (REINFORCE with Baseline, Sutton & Barto Ch.13.4)
+        self.value_net = nn.Sequential(
+            nn.Linear(n_observations, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 1),
+        ).to(device)
+        self.optimizer = optim.Adam(
+            list(self.policy_net.parameters()) + list(self.value_net.parameters()),
+            lr=learning_rate,
+        )
         self.device = device
 
         super(MC_REINFORCE, self).__init__(
@@ -149,14 +160,12 @@ class MC_REINFORCE(BaseAlgorithm):
                 G = rewards[t] + self.discount_factor * G * (1.0 - dones[t])
                 returns[t] = G
 
-            # Normalize GLOBALLY (all envs + timesteps)
-            returns = (returns - returns.mean()) / (returns.std() + 1e-8)
-
-            # Multi-epoch update (like PPO but without clipping)
+            # Multi-epoch update with value baseline
             for _ in range(self.num_epochs):
-                # Re-evaluate log_probs and entropy with current policy
+                # Re-evaluate log_probs, entropy, and values with current networks
                 all_log_probs = []
                 all_entropy = []
+                all_values = []
                 for t in range(T):
                     dist = self._get_distribution(obs_tensor[t])
                     if self.action_type == "continuous":
@@ -165,14 +174,26 @@ class MC_REINFORCE(BaseAlgorithm):
                         lp = dist.log_prob(actions_tensor[t].squeeze(-1))
                     all_log_probs.append(lp)
                     all_entropy.append(dist.entropy().mean())
+                    all_values.append(self.value_net(obs_tensor[t]).squeeze(-1))
 
                 log_probs = torch.stack(all_log_probs)   # (T, N)
                 entropy = torch.stack(all_entropy).mean()
+                values = torch.stack(all_values)          # (T, N)
 
-                loss = -(returns.detach() * log_probs).mean() - self.entropy_coef * entropy
+                # Advantage = MC return - value baseline (variance reduction)
+                advantage = returns.detach() - values.detach()
+                advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
+
+                policy_loss = -(advantage * log_probs).mean() - self.entropy_coef * entropy
+                value_loss = (values - returns.detach()).pow(2).mean()
+                loss = policy_loss + self.value_loss_coef * value_loss
+
                 self.optimizer.zero_grad()
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=0.5)
+                torch.nn.utils.clip_grad_norm_(
+                    list(self.policy_net.parameters()) + list(self.value_net.parameters()),
+                    max_norm=0.5,
+                )
                 self.optimizer.step()
 
             iteration += 1
