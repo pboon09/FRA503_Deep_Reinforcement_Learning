@@ -20,7 +20,9 @@ class TD3_Actor(nn.Module):
     def __init__(self, n_observations: int, hidden_dim: int, n_actions: int):
         super(TD3_Actor, self).__init__()
         # ========= put your code here ========= #
-        pass
+        self.fc1 = nn.Linear(n_observations, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc3 = nn.Linear(hidden_dim, n_actions)
         # ====================================== #
 
     def forward(self, state: torch.Tensor) -> torch.Tensor:
@@ -34,7 +36,9 @@ class TD3_Actor(nn.Module):
             Tensor: Deterministic action in [-1, 1] (scale externally).
         """
         # ========= put your code here ========= #
-        pass
+        x = F.relu(self.fc1(state))
+        x = F.relu(self.fc2(x))
+        return torch.tanh(self.fc3(x))
         # ====================================== #
 
 
@@ -52,12 +56,16 @@ class TD3_Critic(nn.Module):
 
         # ===== Q1 network ===== #
         # ========= put your code here ========= #
-        pass
+        self.q1_fc1 = nn.Linear(n_observations + n_actions, hidden_dim)
+        self.q1_fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.q1_out = nn.Linear(hidden_dim, 1)
         # ====================================== #
 
         # ===== Q2 network (independent weights) ===== #
         # ========= put your code here ========= #
-        pass
+        self.q2_fc1 = nn.Linear(n_observations + n_actions, hidden_dim)
+        self.q2_fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.q2_out = nn.Linear(hidden_dim, 1)
         # ====================================== #
 
     def forward(self, state: torch.Tensor, action: torch.Tensor):
@@ -72,7 +80,16 @@ class TD3_Critic(nn.Module):
             Tuple[Tensor, Tensor]: (Q1, Q2) both of shape (batch, 1).
         """
         # ========= put your code here ========= #
-        pass
+        sa = torch.cat([state, action], dim=-1)
+
+        q1 = F.relu(self.q1_fc1(sa))
+        q1 = F.relu(self.q1_fc2(q1))
+        q1 = self.q1_out(q1)
+
+        q2 = F.relu(self.q2_fc1(sa))
+        q2 = F.relu(self.q2_fc2(q2))
+        q2 = self.q2_out(q2)
+        return q1, q2
         # ====================================== #
 
     def Q1(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
@@ -91,7 +108,11 @@ class TD3_Critic(nn.Module):
             Tensor: Q1 value of shape (batch, 1).
         """
         # ========= put your code here ========= #
-        pass
+        sa = torch.cat([state, action], dim=-1)
+        q1 = F.relu(self.q1_fc1(sa))
+        q1 = F.relu(self.q1_fc2(q1))
+        q1 = self.q1_out(q1)
+        return q1
         # ====================================== #
 
 
@@ -184,7 +205,20 @@ class TD3(OffPolicyAlgorithm):
             Tensor: Action tensor of shape (action_dim,).
         """
         # ========= put your code here ========= #
-        pass
+        if state.dim() == 1:
+            state = state.unsqueeze(0)
+
+        with torch.no_grad():
+            action = self.actor(state)
+
+            if add_noise:
+                noise = torch.randn_like(action) * self.exploration_noise
+                action = (action + noise).clamp(-1.0, 1.0)
+
+        # Scale action from [-1, 1] to [action_min, action_max]
+        action_min, action_max = self.action_range
+        scaled_action = action_min + (action + 1.0) * 0.5 * (action_max - action_min)
+        return scaled_action
         # ====================================== #
 
     def calculate_loss(self, states, actions, rewards, next_states, dones):
@@ -202,7 +236,28 @@ class TD3(OffPolicyAlgorithm):
             Tuple[Tensor, Tensor | None]: (critic_loss, actor_loss or None)
         """
         # ========= put your code here ========= #
-        pass
+        with torch.no_grad():
+            # Target policy smoothing
+            next_action = self.actor_target(next_states)
+            noise = (torch.randn_like(next_action) * self.target_noise).clamp(
+                -self.target_noise_clip, self.target_noise_clip
+            )
+            next_action = (next_action + noise).clamp(-1.0, 1.0)
+
+            # Target Q-values
+            target_q1, target_q2 = self.critic_target(next_states, next_action)
+            target_q = rewards + self.discount_factor * (1 - dones) * torch.min(target_q1, target_q2)
+
+        # Current Q-values
+        current_q1, current_q2 = self.critic(states, actions)
+        critic_loss = F.mse_loss(current_q1, target_q) + F.mse_loss(current_q2, target_q)
+
+        # Delayed actor update
+        actor_loss = None
+        if self.total_steps % self.policy_update_freq == 0:
+            actor_loss = -self.critic.Q1(states, self.actor(states)).mean()
+
+        return critic_loss, actor_loss
         # ====================================== #
 
     def generate_sample(self, batch_size=None):
@@ -221,6 +276,14 @@ class TD3(OffPolicyAlgorithm):
         batch = super().generate_sample()
         if batch is None:
             return None
+
+        states = torch.stack([t.state for t in batch]).to(self.device)
+        actions = torch.stack([t.action for t in batch]).to(self.device)
+        rewards = torch.tensor([t.reward for t in batch], dtype=torch.float32, device=self.device).unsqueeze(-1)
+        next_states = torch.stack([t.next_state for t in batch]).to(self.device)
+        dones = torch.tensor([t.done for t in batch], dtype=torch.float32, device=self.device).unsqueeze(-1)
+
+        return states, actions, rewards, next_states, dones
         # ====================================== #
 
     def update_policy(self):
@@ -239,14 +302,32 @@ class TD3(OffPolicyAlgorithm):
             states, actions, rewards, next_states, dones
         )
         # ========= put your code here ========= #
-        pass
+        # Update critic
+        self.critic_optimizer.zero_grad()
+        critic_loss.backward()
+        self.critic_optimizer.step()
+
+        # Delayed actor update
+        if actor_loss is not None:
+            self.actor_optimizer.zero_grad()
+            actor_loss.backward()
+            self.actor_optimizer.step()
+
+            # Update target networks only when actor is updated
+            self.update_target_networks()
         # ====================================== #
 
         self.total_steps += 1
 
     def update_target_networks(self):
         # ========= put your code here ========= #
-        pass
+        # Polyak update for critic target
+        for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
+            target_param.data.copy_(self.tau * param.data + (1.0 - self.tau) * target_param.data)
+
+        # Polyak update for actor target
+        for target_param, param in zip(self.actor_target.parameters(), self.actor.parameters()):
+            target_param.data.copy_(self.tau * param.data + (1.0 - self.tau) * target_param.data)
         # ====================================== #
 
     def learn(self, env, num_agents: int = 1, max_steps: int = 1000):
@@ -263,7 +344,59 @@ class TD3(OffPolicyAlgorithm):
             Tuple[float, int]: (episode_return, timestep)
         """
         # ========= put your code here ========= #
-        pass
+        obs, _ = env.reset()
+        episode_return = 0.0
+
+        for timestep in range(max_steps):
+            # Select action (obs is already a torch.Tensor on GPU from Isaac Lab)
+            if obs.dim() == 2 and num_agents == 1:
+                state = obs.squeeze(0)
+            else:
+                state = obs
+
+            scaled_action = self.select_action(state)
+
+            # Step the environment
+            next_obs, reward, terminated, truncated, info = env.step(scaled_action)
+
+            done = terminated | truncated if isinstance(terminated, bool) else (terminated | truncated).float()
+
+            # Convert scaled action back to raw [-1, 1] for storage
+            action_min, action_max = self.action_range
+            raw_action = (scaled_action - action_min) / (action_max - action_min) * 2.0 - 1.0
+
+            # Handle single vs multi agent
+            if num_agents == 1:
+                state_store = state.squeeze(0) if state.dim() > 1 else state
+                next_state_store = next_obs.squeeze(0) if next_obs.dim() > 1 else next_obs
+                action_store = raw_action.squeeze(0) if raw_action.dim() > 1 else raw_action
+                reward_val = reward.item() if isinstance(reward, torch.Tensor) else reward
+                done_val = done.item() if isinstance(done, torch.Tensor) else done
+
+                self.store_transition(state_store, action_store, reward_val, next_state_store, done_val)
+                episode_return += reward_val
+            else:
+                for i in range(num_agents):
+                    s = state[i] if state.dim() > 1 else state
+                    a = raw_action[i] if raw_action.dim() > 1 else raw_action
+                    r = reward[i].item() if isinstance(reward, torch.Tensor) else reward
+                    ns = next_obs[i] if next_obs.dim() > 1 else next_obs
+                    d = done[i].item() if isinstance(done, torch.Tensor) else done
+                    self.store_transition(s, a, r, ns, d)
+                episode_return += reward.sum().item() if isinstance(reward, torch.Tensor) else reward
+
+            # Update policy
+            self.update_policy()
+
+            obs = next_obs
+
+            # Check termination for single agent
+            if num_agents == 1:
+                done_check = done.item() if isinstance(done, torch.Tensor) else done
+                if done_check:
+                    break
+
+        return episode_return, timestep + 1
         # ====================================== #
 
     # ------------------------------------------------------------------ #
@@ -279,7 +412,11 @@ class TD3(OffPolicyAlgorithm):
             filename (str): File name (e.g., 'td3_cartpole.pth').
         """
         # ========= put your code here ========= #
-        pass
+        os.makedirs(path, exist_ok=True)
+        torch.save({
+            'actor': self.actor.state_dict(),
+            'critic': self.critic.state_dict(),
+        }, os.path.join(path, filename))
         # ====================================== #
 
     def load_model(self, path: str, filename: str) -> None:
@@ -291,5 +428,9 @@ class TD3(OffPolicyAlgorithm):
             filename (str): File name (e.g., 'td3_cartpole.pth').
         """
         # ========= put your code here ========= #
-        pass
+        checkpoint = torch.load(os.path.join(path, filename), map_location=self.device)
+        self.actor.load_state_dict(checkpoint['actor'])
+        self.critic.load_state_dict(checkpoint['critic'])
+        self.actor_target.load_state_dict(self.actor.state_dict())
+        self.critic_target.load_state_dict(self.critic.state_dict())
         # ====================================== #

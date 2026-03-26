@@ -2,9 +2,11 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.distributions.normal import Normal
+from torch.distributions.categorical import Categorical
 from storage.on_policy import OnPolicyAlgorithm
 from storage.buffers import RolloutBuffer
-from network.mlp import MLP
+from networks.mlp import MLP
 
 
 class ActorCritic_A2C(nn.Module):
@@ -42,7 +44,8 @@ class ActorCritic_A2C(nn.Module):
 
         # ===== Actor and Critic networks ===== #
         # ========= put your code here ========= #
-        pass
+        self.actor = MLP(state_dim, action_dim, hidden_dims, activation)
+        self.critic = MLP(state_dim, 1, hidden_dims, activation)
         # ====================================== #
 
         # ===== Learnable log_std for continuous actions ===== #
@@ -79,7 +82,11 @@ class ActorCritic_A2C(nn.Module):
         Discrete  : ``Categorical(logits)``
         """
         # ========= put your code here ========= #
-        pass
+        mean = self.actor(obs)
+        if self.action_type == "continuous":
+            self.distribution = Normal(mean, self.std)
+        else:
+            self.distribution = Categorical(logits=mean)
         # ====================================== #
 
     def act(self, obs: torch.Tensor) -> torch.Tensor:
@@ -90,19 +97,28 @@ class ActorCritic_A2C(nn.Module):
         Discrete  : shape (batch, 1).
         """
         # ========= put your code here ========= #
-        pass
+        self._update_distribution(obs)
+        sample = self.distribution.sample()
+        if self.action_type == "continuous":
+            return sample
+        else:
+            return sample.unsqueeze(-1)
         # ====================================== #
 
     def act_inference(self, obs: torch.Tensor) -> torch.Tensor:
         """Deterministic action: actor mean (continuous) or argmax (discrete)."""
         # ========= put your code here ========= #
-        pass
+        mean = self.actor(obs)
+        if self.action_type == "continuous":
+            return mean
+        else:
+            return mean.argmax(dim=-1)
         # ====================================== #
 
     def evaluate(self, obs: torch.Tensor) -> torch.Tensor:
         """Critic value estimate V(s), shape (batch, 1)."""
         # ========= put your code here ========= #
-        pass
+        return self.critic(obs)
         # ====================================== #
 
     def get_actions_log_prob(self, actions: torch.Tensor) -> torch.Tensor:
@@ -113,7 +129,10 @@ class ActorCritic_A2C(nn.Module):
         Discrete  : scalar log-prob      → shape (batch,).
         """
         # ========= put your code here ========= #
-        pass
+        if self.action_type == "continuous":
+            return self.distribution.log_prob(actions).sum(dim=-1)
+        else:
+            return self.distribution.log_prob(actions.squeeze(-1))
         # ====================================== #
 
 
@@ -226,7 +245,15 @@ class A2C(OnPolicyAlgorithm):
             Tensor: Sampled actions.
         """
         # ========= put your code here ========= #
-        pass
+        self.policy._update_distribution(obs)
+        action = self.policy.act(obs)
+        self.transition.observations = obs
+        self.transition.actions = action
+        self.transition.values = self.policy.evaluate(obs).detach()
+        self.transition.actions_log_prob = self.policy.get_actions_log_prob(action).detach()
+        self.transition.action_mean = self.policy.action_mean.detach()
+        self.transition.action_sigma = self.policy.action_std.detach()
+        return action
         # ====================================== #
 
     def process_env_step(
@@ -242,7 +269,8 @@ class A2C(OnPolicyAlgorithm):
             dones (Tensor): shape (num_envs,) or (num_envs, 1).
         """
         # ========= put your code here ========= #
-        pass
+        self.transition.rewards = rewards
+        self.transition.dones = dones
         # ====================================== #
 
         self.add_transition()
@@ -272,29 +300,33 @@ class A2C(OnPolicyAlgorithm):
         """
         # ===== Bootstrap value at end of rollout ===== #
         # ========= put your code here ========= #
-        pass
+        last_value = self.policy.evaluate(last_obs).detach()
         # ====================================== #
 
         for step in reversed(range(self.storage.num_transitions_per_env)):
 
             # ===== TD delta: r + γ·V(s')·(1-done) - V(s) ===== #
             # ========= put your code here ========= #
-            pass
+            if step == self.storage.num_transitions_per_env - 1:
+                next_values = last_value
+            else:
+                next_values = self.storage.values[step + 1]
+            delta = self.storage.rewards[step] + self.discount_factor * next_values * (1 - self.storage.dones[step]) - self.storage.values[step]
             # ====================================== #
 
             # ===== A2C: advantage = delta (no lambda accumulation) ===== #
             # ========= put your code here ========= #
-            pass
+            self.storage.advantages[step] = delta
             # ====================================== #
 
             # ===== Return = advantage + V(s) ===== #
             # ========= put your code here ========= #
-            pass
+            self.storage.returns[step] = self.storage.advantages[step] + self.storage.values[step]
             # ====================================== #
 
         # ===== Normalize advantages ===== #
         # ========= put your code here ========= #
-        pass
+        self.storage.advantages = (self.storage.advantages - self.storage.advantages.mean()) / (self.storage.advantages.std() + 1e-8)
         # ====================================== #
 
     # ------------------------------------------------------------------ #
@@ -317,35 +349,45 @@ class A2C(OnPolicyAlgorithm):
         """
         # ===== Flatten rollout tensors ===== #
         # ========= put your code here ========= #
-        pass
+        obs = self.storage.observations.flatten(0, 1)
+        actions = self.storage.actions.flatten(0, 1)
+        returns = self.storage.returns.flatten(0, 1)
+        advantages = self.storage.advantages.flatten(0, 1)
         # ====================================== #
 
         # ===== Recompute log-probs, values, entropy for current policy ===== #
         # ========= put your code here ========= #
-        pass
+        self.policy._update_distribution(obs)
+        new_log_probs = self.policy.get_actions_log_prob(actions)
+        new_values = self.policy.evaluate(obs)
+        entropy = self.policy.entropy
         # ====================================== #
 
         # ===== Actor loss: -mean(log_prob · advantage) ===== #
         # ========= put your code here ========= #
-        pass
+        actor_loss = -(new_log_probs * advantages.squeeze(-1)).mean()
         # ====================================== #
 
         # ===== Critic loss: MSE(V(s), returns) ===== #
         # ========= put your code here ========= #
-        pass
+        critic_loss = (new_values - returns).pow(2).mean()
         # ====================================== #
 
         # ===== Total loss → gradient step with grad clipping ===== #
         # ========= put your code here ========= #
-        pass
+        loss = actor_loss + self.value_loss_coef * critic_loss - self.entropy_coef * entropy.mean()
+        self.optimizer.zero_grad()
+        loss.backward()
+        nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+        self.optimizer.step()
         # ====================================== #
 
         self.storage.clear()
 
         return {
-            "value":   0.0,   # replace with actual critic_loss.item()
-            "actor":   0.0,   # replace with actual actor_loss.item()
-            "entropy": 0.0,   # replace with actual entropy.mean().item()
+            "value":   critic_loss.item(),
+            "actor":   actor_loss.item(),
+            "entropy": entropy.mean().item(),
         }
 
     # ------------------------------------------------------------------ #
@@ -375,12 +417,19 @@ class A2C(OnPolicyAlgorithm):
         """
         # ===== Create rollout buffer via inherited _init_storage() ===== #
         # ========= put your code here ========= #
-        pass
+        if self.action_type == "continuous":
+            actions_shape = (self.num_of_action,)
+        else:
+            actions_shape = (1,)
+
+        obs, _ = env.reset()
+        n_obs = obs.shape[1]
+        self._init_storage(num_envs, num_transitions_per_env, (n_obs,), actions_shape, self.device)
         # ====================================== #
 
         # ===== Reset environment ===== #
         # ========= put your code here ========= #
-        pass
+        obs, _ = env.reset()
         # ====================================== #
 
         for episode in range(max_episodes):
@@ -390,27 +439,32 @@ class A2C(OnPolicyAlgorithm):
 
                     # ===== Sample actions ===== #
                     # ========= put your code here ========= #
-                    pass
+                    action = self.act(obs)
                     # ====================================== #
 
                     # ===== Step environment ===== #
                     # ========= put your code here ========= #
-                    pass
+                    if self.action_type == "continuous":
+                        action_clipped = action.clamp(self.action_range[0], self.action_range[1])
+                    else:
+                        action_clipped = action
+                    obs, rewards, dones, truncated, _ = env.step(action_clipped)
                     # ====================================== #
 
                     # process_env_step calls add_transition() internally
                     # ========= put your code here ========= #
-                    pass
+                    dones = dones | truncated
+                    self.process_env_step(rewards, dones)
                     # ====================================== #
 
                 # ===== Bootstrap returns ===== #
                 # ========= put your code here ========= #
-                pass
+                self.compute_returns(obs)
                 # ====================================== #
 
             # ===== Policy update (calls storage.clear() internally) ===== #
             # ========= put your code here ========= #
-            pass
+            self.update()
             # ====================================== #
 
     # ------------------------------------------------------------------ #
@@ -424,7 +478,9 @@ class A2C(OnPolicyAlgorithm):
         Continuous: actor mean. Discrete: argmax of logits.
         """
         # ========= put your code here ========= #
-        pass
+        self.policy.eval()
+        with torch.no_grad():
+            return self.policy.act_inference(obs)
         # ====================================== #
 
     def save_model(self, path: str, filename: str) -> None:
@@ -436,7 +492,7 @@ class A2C(OnPolicyAlgorithm):
             filename (str): File name (e.g., 'a2c_cartpole.pth').
         """
         # ========= put your code here ========= #
-        pass
+        torch.save(self.policy.state_dict(), f"{path}/{filename}")
         # ====================================== #
 
     def load_model(self, path: str, filename: str) -> None:
@@ -448,5 +504,5 @@ class A2C(OnPolicyAlgorithm):
             filename (str): File name (e.g., 'a2c_cartpole.pth').
         """
         # ========= put your code here ========= #
-        pass
+        self.policy.load_state_dict(torch.load(f"{path}/{filename}"))
         # ====================================== #

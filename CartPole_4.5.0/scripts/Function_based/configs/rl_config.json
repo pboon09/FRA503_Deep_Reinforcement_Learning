@@ -1,0 +1,104 @@
+{
+    "shared": {
+        "n_episodes": 20000,
+        "n_observations": 4,
+        "action_range": [-2.5, 2.5],
+        "discount_factor": 0.99
+    },
+    "algorithms": {
+        "Linear_Q": {
+            "num_of_action": 11,
+            "learning_rate": 0.1,
+            "lr_decay": 0.9999,
+            "initial_epsilon": 1.0,
+            "epsilon_decay": 0.0000095,
+            "final_epsilon": 0.05
+        },
+        "DQN": {
+            "num_of_action": 11,
+            "hidden_dim": 128,
+            "dropout": 0.0,
+            "learning_rate": 0.0001,
+            "tau": 0.005,
+            "initial_epsilon": 1.0,
+            "epsilon_decay": 0.0000048,
+            "final_epsilon": 0.04,
+            "buffer_size": 1000000,
+            "batch_size": 128,
+            "learning_starts": 10000
+        },
+        "MC_REINFORCE": {
+            "num_of_action": 1,
+            "hidden_dim": 64,
+            "dropout": 0.0,
+            "action_type": "continuous",
+            "learning_rate": 0.0005
+        },
+        "AC": {
+            "num_of_action": 1,
+            "hidden_dims": [64, 64],
+            "activation": "elu",
+            "action_type": "continuous",
+            "init_noise_std": 0.6,
+            "learning_rate": 0.0007,
+            "value_loss_coef": 0.5,
+            "entropy_coef": 0.01,
+            "max_grad_norm": 0.5
+        },
+        "A2C": {
+            "num_of_action": 1,
+            "hidden_dims": [64, 64],
+            "activation": "elu",
+            "action_type": "continuous",
+            "init_noise_std": 0.6,
+            "learning_rate": 0.0007,
+            "value_loss_coef": 0.5,
+            "entropy_coef": 0.01,
+            "max_grad_norm": 0.5,
+            "num_transitions_per_env": 16,
+            "num_envs": 16
+        },
+        "PPO": {
+            "num_of_action": 1,
+            "hidden_dims": [64, 64],
+            "activation": "elu",
+            "action_type": "continuous",
+            "init_noise_std": 1.0,
+            "num_learning_epochs": 5,
+            "num_mini_batches": 4,
+            "num_transitions_per_env": 24,
+            "clip_param": 0.2,
+            "lam": 0.95,
+            "value_loss_coef": 0.5,
+            "entropy_coef": 0.01,
+            "learning_rate": 0.0003,
+            "max_grad_norm": 0.5,
+            "desired_kl": 0.0,
+            "num_envs": 16
+        },
+        "SAC": {
+            "num_of_action": 1,
+            "hidden_dim": 256,
+            "learning_rate": 0.0003,
+            "alpha_lr": 0.0003,
+            "tau": 0.005,
+            "buffer_size": 1000000,
+            "batch_size": 256,
+            "init_alpha": 0.2,
+            "auto_alpha": true,
+            "target_entropy": null
+        },
+        "TD3": {
+            "num_of_action": 1,
+            "hidden_dim": 256,
+            "learning_rate": 0.0003,
+            "tau": 0.005,
+            "buffer_size": 1000000,
+            "batch_size": 256,
+            "exploration_noise": 0.1,
+            "target_noise": 0.2,
+            "target_noise_clip": 0.5,
+            "policy_update_freq": 2
+        }
+    }
+}

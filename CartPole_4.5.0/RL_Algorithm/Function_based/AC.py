@@ -1,11 +1,13 @@
 from __future__ import annotations
+import os
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions.normal import Normal
 from torch.distributions.categorical import Categorical
 from storage.on_policy import OnPolicyAlgorithm
-from network.mlp import MLP
+from networks.mlp import MLP
 
 
 # ============================================================ #
@@ -89,7 +91,11 @@ class ActorCritic(nn.Module):
         Discrete  : ``Categorical(logits)``
         """
         # ========= put your code here ========= #
-        pass
+        mean = self.actor(obs)
+        if self.action_type == "continuous":
+            self.distribution = Normal(mean, self.std)
+        else:
+            self.distribution = Categorical(logits=mean)
         # ====================================== #
 
     def act(self, obs: torch.Tensor) -> torch.Tensor:
@@ -100,19 +106,28 @@ class ActorCritic(nn.Module):
         Discrete  : shape (batch, 1).
         """
         # ========= put your code here ========= #
-        pass
+        self._update_distribution(obs)
+        sample = self.distribution.sample()
+        if self.action_type == "continuous":
+            return sample
+        else:
+            return sample.unsqueeze(-1)
         # ====================================== #
 
     def act_inference(self, obs: torch.Tensor) -> torch.Tensor:
         """Deterministic action: actor mean (continuous) or argmax (discrete)."""
         # ========= put your code here ========= #
-        pass
+        mean = self.actor(obs)
+        if self.action_type == "continuous":
+            return mean
+        else:
+            return mean.argmax(dim=-1)
         # ====================================== #
 
     def evaluate(self, obs: torch.Tensor) -> torch.Tensor:
         """Critic value estimate V(s), shape (batch, 1)."""
         # ========= put your code here ========= #
-        pass
+        return self.critic(obs)
         # ====================================== #
 
     def get_actions_log_prob(self, actions: torch.Tensor) -> torch.Tensor:
@@ -123,7 +138,10 @@ class ActorCritic(nn.Module):
         Discrete  : scalar log-prob → shape (batch,).
         """
         # ========= put your code here ========= #
-        pass
+        if self.action_type == "continuous":
+            return self.distribution.log_prob(actions).sum(dim=-1)
+        else:
+            return self.distribution.log_prob(actions.squeeze(-1))
         # ====================================== #
 
 
@@ -212,7 +230,55 @@ class AC(OnPolicyAlgorithm):
             Tuple: (episode_return, log_prob_actions, values, rewards, timestep)
         """
         # ========= put your code here ========= #
-        pass
+        obs, _ = env.reset()
+        if not isinstance(obs, torch.Tensor):
+            obs = torch.tensor(obs, dtype=torch.float32, device=self.device)
+        else:
+            obs = obs.to(self.device)
+
+        log_prob_actions = []
+        values = []
+        rewards = []
+        episode_return = 0.0
+        timestep = 0
+        done = False
+
+        while not done:
+            obs_tensor = obs if isinstance(obs, torch.Tensor) else torch.tensor(obs, dtype=torch.float32, device=self.device)
+
+            action = self.policy.act(obs_tensor)
+            value = self.policy.evaluate(obs_tensor)
+            log_prob = self.policy.get_actions_log_prob(action)
+
+            if self.action_type == "continuous":
+                action_env = action.clamp(self.action_range[0], self.action_range[1])
+            else:
+                action_env = action
+
+            next_obs, reward, terminated, truncated, _ = env.step(action_env)
+            done = terminated or truncated if isinstance(terminated, bool) else (terminated | truncated).any()
+
+            log_prob_actions.append(log_prob)
+            values.append(value.squeeze(-1))
+            if isinstance(reward, torch.Tensor):
+                reward_val = reward.item() if reward.numel() == 1 else reward.sum().item()
+                rewards.append(reward.view(-1))
+            else:
+                reward_val = float(reward)
+                rewards.append(torch.tensor([reward_val], dtype=torch.float32, device=self.device))
+            episode_return += reward_val
+            timestep += 1
+
+            if not isinstance(next_obs, torch.Tensor):
+                obs = torch.tensor(next_obs, dtype=torch.float32, device=self.device)
+            else:
+                obs = next_obs.to(self.device)
+
+        log_prob_actions = torch.cat(log_prob_actions)
+        values = torch.cat(values)
+        rewards = torch.cat(rewards)
+
+        return episode_return, log_prob_actions, values, rewards, timestep
         # ====================================== #
 
     # ------------------------------------------------------------------ #
@@ -230,7 +296,14 @@ class AC(OnPolicyAlgorithm):
             Tensor: Normalised return tensor of shape (T,).
         """
         # ========= put your code here ========= #
-        pass
+        T = len(rewards)
+        returns = torch.zeros(T, device=rewards.device)
+        G = 0.0
+        for t in reversed(range(T)):
+            G = rewards[t].item() + self.discount_factor * G
+            returns[t] = G
+        returns = (returns - returns.mean()) / (returns.std() + 1e-8)
+        return returns
         # ====================================== #
 
     def calculate_loss(self, log_prob_actions, values, returns):
@@ -246,7 +319,10 @@ class AC(OnPolicyAlgorithm):
             Tuple[Tensor, Tensor]: (actor_loss, critic_loss)
         """
         # ========= put your code here ========= #
-        pass
+        advantages = returns - values.detach()
+        actor_loss = -(log_prob_actions * advantages).mean()
+        critic_loss = F.mse_loss(values, returns)
+        return actor_loss, critic_loss
         # ====================================== #
 
     def update_policy(self, log_prob_actions, values, returns) -> float:
@@ -257,7 +333,13 @@ class AC(OnPolicyAlgorithm):
             float: Total combined loss.
         """
         # ========= put your code here ========= #
-        pass
+        actor_loss, critic_loss = self.calculate_loss(log_prob_actions, values, returns)
+        total_loss = actor_loss + self.value_loss_coef * critic_loss
+        self.optimizer.zero_grad()
+        total_loss.backward()
+        nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+        self.optimizer.step()
+        return total_loss.item()
         # ====================================== #
 
     # ------------------------------------------------------------------ #
@@ -279,7 +361,10 @@ class AC(OnPolicyAlgorithm):
         self.policy.train()
 
         # ========= put your code here ========= #
-        pass
+        episode_return, log_prob_actions, values, rewards, timestep = self.generate_trajectory(env)
+        returns = self.compute_returns(rewards)
+        loss = self.update_policy(log_prob_actions, values, returns)
+        return episode_return, loss, timestep
         # ====================================== #
 
     # ------------------------------------------------------------------ #
@@ -300,7 +385,9 @@ class AC(OnPolicyAlgorithm):
     def select_action(self, obs: torch.Tensor) -> torch.Tensor:
         """Deterministic action for evaluation."""
         # ========= put your code here ========= #
-        pass
+        self.policy.eval()
+        with torch.no_grad():
+            return self.policy.act_inference(obs)
         # ====================================== #
 
     def save_model(self, path: str, filename: str) -> None:
@@ -312,7 +399,8 @@ class AC(OnPolicyAlgorithm):
             filename (str): File name (e.g., 'ac_cartpole.pth').
         """
         # ========= put your code here ========= #
-        pass
+        os.makedirs(path, exist_ok=True)
+        torch.save(self.policy.state_dict(), os.path.join(path, filename))
         # ====================================== #
 
     def load_model(self, path: str, filename: str) -> None:
@@ -324,5 +412,7 @@ class AC(OnPolicyAlgorithm):
             filename (str): File name (e.g., 'ac_cartpole.pth').
         """
         # ========= put your code here ========= #
-        pass
+        self.policy.load_state_dict(
+            torch.load(os.path.join(path, filename), map_location=self.device)
+        )
         # ====================================== #

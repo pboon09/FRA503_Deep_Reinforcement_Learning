@@ -43,7 +43,15 @@ class MC_REINFORCE_network(nn.Module):
 
         # ===== Shared MLP body ===== #
         # ========= put your code here ========= #
-        pass
+        self.body = nn.Sequential(
+            nn.Linear(n_observations, hidden_size),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size, n_actions),
+        )
         # ====================================== #
 
         # ===== Learnable log_std (continuous only) ===== #
@@ -66,7 +74,7 @@ class MC_REINFORCE_network(nn.Module):
             Tensor: Logits (discrete) or action mean (continuous).
         """
         # ========= put your code here ========= #
-        pass
+        return self.body(x)
         # ====================================== #
 
 
@@ -145,7 +153,11 @@ class MC_REINFORCE(BaseAlgorithm):
             torch.distributions.Distribution: Categorical or Normal distribution.
         """
         # ========= put your code here ========= #
-        pass
+        output = self.policy_net(obs)
+        if self.action_type == "discrete":
+            return Categorical(logits=output)
+        else:
+            return Normal(output, self.policy_net.log_std.exp())
         # ====================================== #
 
     def _sample_action(self, dist) -> tuple[torch.Tensor, torch.Tensor]:
@@ -162,7 +174,13 @@ class MC_REINFORCE(BaseAlgorithm):
                 - log_prob: Shape ``(batch,)``.
         """
         # ========= put your code here ========= #
-        pass
+        action = dist.sample()
+        log_prob = dist.log_prob(action)
+        if self.action_type == "continuous":
+            log_prob = log_prob.sum(dim=-1)
+        else:
+            action = action.unsqueeze(-1)
+        return action, log_prob
         # ====================================== #
 
     # ------------------------------------------------------------------ #
@@ -180,7 +198,14 @@ class MC_REINFORCE(BaseAlgorithm):
             Tensor: Normalised return tensor of shape ``(T,)``.
         """
         # ========= put your code here ========= #
-        pass
+        returns = []
+        G = 0
+        for r in reversed(rewards):
+            G = r + self.discount_factor * G
+            returns.insert(0, G)
+        returns = torch.tensor(returns, dtype=torch.float32, device=self.device)
+        returns = (returns - returns.mean()) / (returns.std() + 1e-8)
+        return returns
         # ====================================== #
 
     def generate_trajectory(self, env):
@@ -198,7 +223,49 @@ class MC_REINFORCE(BaseAlgorithm):
                 - trajectory (list): ``[(state, action, reward), ...]``
         """
         # ========= put your code here ========= #
-        pass
+        obs, info = env.reset()
+        if not isinstance(obs, torch.Tensor):
+            obs = torch.tensor(obs, dtype=torch.float32, device=self.device)
+        else:
+            obs = obs.to(self.device)
+
+        rewards = []
+        log_probs = []
+        trajectory = []
+        done = False
+        episode_return = 0.0
+
+        while not done:
+            dist = self._get_distribution(obs)
+            action, log_prob = self._sample_action(dist)
+
+            if self.action_type == "discrete":
+                env_action = self.scale_action(action.item())
+            else:
+                action_min, action_max = self.action_range
+                env_action = action.clamp(action_min, action_max)
+
+            next_obs, reward, terminated, truncated, info = env.step(env_action)
+            done = terminated or truncated
+
+            if not isinstance(reward, (int, float)):
+                reward_val = reward.item()
+            else:
+                reward_val = reward
+
+            rewards.append(reward_val)
+            log_probs.append(log_prob)
+            trajectory.append((obs, action, reward_val))
+            episode_return += reward_val
+
+            if not isinstance(next_obs, torch.Tensor):
+                obs = torch.tensor(next_obs, dtype=torch.float32, device=self.device)
+            else:
+                obs = next_obs.to(self.device)
+
+        stepwise_returns = self.calculate_stepwise_returns(rewards)
+        log_prob_actions = torch.stack(log_probs).squeeze()
+        return episode_return, stepwise_returns, log_prob_actions, trajectory
         # ====================================== #
 
     def calculate_loss(
@@ -217,7 +284,8 @@ class MC_REINFORCE(BaseAlgorithm):
             Tensor: Scalar loss.
         """
         # ========= put your code here ========= #
-        pass
+        loss = -(log_prob_actions * stepwise_returns).mean()
+        return loss
         # ====================================== #
 
     def update_policy(
@@ -236,7 +304,11 @@ class MC_REINFORCE(BaseAlgorithm):
             float: Loss value after the update.
         """
         # ========= put your code here ========= #
-        pass
+        loss = self.calculate_loss(stepwise_returns, log_prob_actions)
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        return loss.item()
         # ====================================== #
 
     def learn(self, env, num_agents: int = 1):
@@ -253,7 +325,9 @@ class MC_REINFORCE(BaseAlgorithm):
         self.policy_net.train()
 
         # ========= put your code here ========= #
-        pass
+        episode_return, stepwise_returns, log_prob_actions, trajectory = self.generate_trajectory(env)
+        loss = self.update_policy(stepwise_returns, log_prob_actions)
+        return episode_return, loss, trajectory
         # ====================================== #
 
     # ------------------------------------------------------------------ #
@@ -269,7 +343,8 @@ class MC_REINFORCE(BaseAlgorithm):
             filename (str): File name (e.g., ``'reinforce_cartpole.pth'``).
         """
         # ========= put your code here ========= #
-        pass
+        os.makedirs(path, exist_ok=True)
+        torch.save(self.policy_net.state_dict(), os.path.join(path, filename))
         # ====================================== #
 
     def load_model(self, path: str, filename: str) -> None:
@@ -281,5 +356,7 @@ class MC_REINFORCE(BaseAlgorithm):
             filename (str): File name (e.g., ``'reinforce_cartpole.pth'``).
         """
         # ========= put your code here ========= #
-        pass
+        self.policy_net.load_state_dict(
+            torch.load(os.path.join(path, filename), map_location=self.device)
+        )
         # ====================================== #

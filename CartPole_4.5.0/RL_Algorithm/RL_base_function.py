@@ -64,7 +64,9 @@ class BaseAlgorithm:
             torch.Tensor: Scaled continuous action tensor.
         """
         # ========= put your code here ========= #
-        pass
+        action_min, action_max = self.action_range
+        continuous_action = action_min + (action / (self.num_of_action - 1)) * (action_max - action_min)
+        return torch.tensor([continuous_action], dtype=torch.float32)
         # ====================================== #
 
     def decay_epsilon(self) -> None:
@@ -75,7 +77,7 @@ class BaseAlgorithm:
         Call once per environment step during training.
         """
         # ========= put your code here ========= #
-        pass
+        self.epsilon = max(self.final_epsilon, self.epsilon - self.epsilon_decay)
         # ====================================== #
 
     # ------------------------------------------------------------------ #

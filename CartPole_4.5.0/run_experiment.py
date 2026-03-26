@@ -1,0 +1,506 @@
+"""
+Run all 8 function-based RL algorithms sequentially on the CartPole Stabilize task.
+
+For each algorithm:
+  1. Train for n_episodes episodes (with progress bar)
+  2. Deploy (evaluate) for 10 episodes with deterministic policy
+  3. Save training CSV, deployment CSV, and final model
+
+Usage (Isaac Lab):
+    python run_experiment.py --task Stabilize-Isaac-Cartpole-v0
+
+The script expects the Isaac Lab simulator and CartPole extension to be available.
+"""
+
+import argparse
+import sys
+import os
+import json
+import csv
+import time
+
+from isaaclab.app import AppLauncher
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__))))
+
+# ------------------------------------------------------------------ #
+# CLI arguments                                                        #
+# ------------------------------------------------------------------ #
+parser = argparse.ArgumentParser(description="Run all RL experiments.")
+parser.add_argument("--task", type=str, default="Stabilize-Isaac-Cartpole-v0",
+                    help="Isaac Lab task name.")
+parser.add_argument("--num_envs", type=int, default=1,
+                    help="Number of parallel environments (overridden per-algo for A2C/PPO).")
+parser.add_argument("--seed", type=int, default=42, help="Random seed.")
+parser.add_argument("--config", type=str,
+                    default=os.path.join(os.path.dirname(__file__),
+                                         "scripts", "Function_based", "configs", "rl_config.json"),
+                    help="Path to rl_config.json.")
+parser.add_argument("--deploy_episodes", type=int, default=10,
+                    help="Number of deployment (evaluation) episodes.")
+
+AppLauncher.add_app_launcher_args(parser)
+args_cli, hydra_args = parser.parse_known_args()
+sys.argv = [sys.argv[0]] + hydra_args
+
+app_launcher = AppLauncher(args_cli)
+simulation_app = app_launcher.app
+
+# ------------------------------------------------------------------ #
+# Imports that require the simulator to be running                     #
+# ------------------------------------------------------------------ #
+import gymnasium as gym
+import torch
+import numpy as np
+import random
+from tqdm import tqdm
+
+from isaaclab.envs import (
+    DirectMARLEnv, DirectMARLEnvCfg, DirectRLEnvCfg,
+    ManagerBasedRLEnvCfg, multi_agent_to_single_agent,
+)
+from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
+from isaaclab_tasks.utils.hydra import hydra_task_config
+
+import CartPole.tasks  # noqa: F401
+
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+torch.backends.cudnn.deterministic = False
+torch.backends.cudnn.benchmark = False
+
+# ------------------------------------------------------------------ #
+# Algorithm imports                                                    #
+# ------------------------------------------------------------------ #
+from RL_Algorithm.Function_based.Linear_Q import Linear_QN
+from RL_Algorithm.Function_based.DQN import DQN
+from RL_Algorithm.Function_based.MC_REINFORCE import MC_REINFORCE
+from RL_Algorithm.Function_based.AC import AC
+from RL_Algorithm.Function_based.A2C import A2C
+from RL_Algorithm.Function_based.PPO import PPO
+from RL_Algorithm.Function_based.SAC import SAC
+from RL_Algorithm.Function_based.TD3 import TD3
+
+# ------------------------------------------------------------------ #
+# Helpers                                                               #
+# ------------------------------------------------------------------ #
+ALGO_ORDER = ["Linear_Q", "DQN", "MC_REINFORCE", "AC", "A2C", "PPO", "SAC", "TD3"]
+
+ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
+def load_config(config_path: str) -> dict:
+    with open(config_path) as f:
+        return json.load(f)
+
+
+def make_env(task: str, env_cfg, num_envs: int = 1):
+    """Create and return an Isaac Lab environment."""
+    env_cfg.scene.num_envs = num_envs
+    env = gym.make(task, cfg=env_cfg)
+    return env
+
+
+def build_agent(algo_name: str, cfg: dict, shared: dict, device: torch.device):
+    """Construct an agent from config."""
+    action_range = shared["action_range"]
+    n_obs = shared["n_observations"]
+    gamma = shared["discount_factor"]
+    ac = cfg  # algorithm-specific config
+
+    if algo_name == "Linear_Q":
+        return Linear_QN(
+            num_of_action=ac["num_of_action"],
+            action_range=action_range,
+            learning_rate=ac["learning_rate"],
+            initial_epsilon=ac["initial_epsilon"],
+            epsilon_decay=ac["epsilon_decay"],
+            final_epsilon=ac["final_epsilon"],
+            discount_factor=gamma,
+        )
+    elif algo_name == "DQN":
+        return DQN(
+            device=device,
+            num_of_action=ac["num_of_action"],
+            action_range=action_range,
+            n_observations=n_obs,
+            hidden_dim=ac["hidden_dim"],
+            dropout=ac.get("dropout", 0.0),
+            learning_rate=ac["learning_rate"],
+            tau=ac["tau"],
+            initial_epsilon=ac["initial_epsilon"],
+            epsilon_decay=ac["epsilon_decay"],
+            final_epsilon=ac["final_epsilon"],
+            discount_factor=gamma,
+            buffer_size=ac["buffer_size"],
+            batch_size=ac["batch_size"],
+        )
+    elif algo_name == "MC_REINFORCE":
+        return MC_REINFORCE(
+            device=device,
+            num_of_action=ac["num_of_action"],
+            action_range=action_range,
+            n_observations=n_obs,
+            hidden_dim=ac["hidden_dim"],
+            dropout=ac.get("dropout", 0.0),
+            action_type=ac["action_type"],
+            learning_rate=ac["learning_rate"],
+            discount_factor=gamma,
+        )
+    elif algo_name == "AC":
+        return AC(
+            device=device,
+            num_of_action=ac["num_of_action"],
+            action_range=action_range,
+            n_observations=n_obs,
+            hidden_dims=ac["hidden_dims"],
+            activation=ac.get("activation", "elu"),
+            action_type=ac["action_type"],
+            init_noise_std=ac.get("init_noise_std", 0.6),
+            learning_rate=ac["learning_rate"],
+            discount_factor=gamma,
+            value_loss_coef=ac.get("value_loss_coef", 0.5),
+            entropy_coef=ac.get("entropy_coef", 0.01),
+            max_grad_norm=ac.get("max_grad_norm", 0.5),
+        )
+    elif algo_name == "A2C":
+        return A2C(
+            device=device,
+            num_of_action=ac["num_of_action"],
+            action_range=action_range,
+            n_observations=n_obs,
+            hidden_dims=ac["hidden_dims"],
+            activation=ac.get("activation", "elu"),
+            action_type=ac["action_type"],
+            init_noise_std=ac.get("init_noise_std", 0.6),
+            learning_rate=ac["learning_rate"],
+            discount_factor=gamma,
+            value_loss_coef=ac.get("value_loss_coef", 0.5),
+            entropy_coef=ac.get("entropy_coef", 0.01),
+            max_grad_norm=ac.get("max_grad_norm", 0.5),
+        )
+    elif algo_name == "PPO":
+        return PPO(
+            device=device,
+            num_of_action=ac["num_of_action"],
+            action_range=action_range,
+            n_observations=n_obs,
+            hidden_dims=ac["hidden_dims"],
+            activation=ac.get("activation", "elu"),
+            action_type=ac["action_type"],
+            init_noise_std=ac.get("init_noise_std", 1.0),
+            num_learning_epochs=ac["num_learning_epochs"],
+            num_mini_batches=ac["num_mini_batches"],
+            clip_param=ac["clip_param"],
+            gamma=gamma,
+            lam=ac["lam"],
+            value_loss_coef=ac.get("value_loss_coef", 0.5),
+            entropy_coef=ac.get("entropy_coef", 0.01),
+            learning_rate=ac["learning_rate"],
+            max_grad_norm=ac.get("max_grad_norm", 0.5),
+            desired_kl=ac.get("desired_kl", 0.0),
+        )
+    elif algo_name == "SAC":
+        return SAC(
+            device=device,
+            num_of_action=ac["num_of_action"],
+            action_range=action_range,
+            n_observations=n_obs,
+            hidden_dim=ac["hidden_dim"],
+            learning_rate=ac["learning_rate"],
+            alpha_lr=ac.get("alpha_lr", 0.0003),
+            tau=ac["tau"],
+            discount_factor=gamma,
+            buffer_size=ac["buffer_size"],
+            batch_size=ac["batch_size"],
+            init_alpha=ac.get("init_alpha", 0.2),
+            auto_alpha=ac.get("auto_alpha", True),
+            target_entropy=ac.get("target_entropy", None),
+        )
+    elif algo_name == "TD3":
+        return TD3(
+            device=device,
+            num_of_action=ac["num_of_action"],
+            action_range=action_range,
+            n_observations=n_obs,
+            hidden_dim=ac["hidden_dim"],
+            learning_rate=ac["learning_rate"],
+            tau=ac["tau"],
+            discount_factor=gamma,
+            buffer_size=ac["buffer_size"],
+            batch_size=ac["batch_size"],
+            exploration_noise=ac.get("exploration_noise", 0.1),
+            target_noise=ac.get("target_noise", 0.2),
+            target_noise_clip=ac.get("target_noise_clip", 0.5),
+            policy_update_freq=ac.get("policy_update_freq", 2),
+        )
+    else:
+        raise ValueError(f"Unknown algorithm: {algo_name}")
+
+
+# ------------------------------------------------------------------ #
+# Training loops                                                       #
+# ------------------------------------------------------------------ #
+
+def train_episodic(agent, env, algo_name, n_episodes, max_steps, csv_writer, device):
+    """Train episodic algorithms (Linear_Q, DQN, MC_REINFORCE, AC, SAC, TD3)."""
+    global_step = 0
+    obs, _ = env.reset()
+
+    for episode in tqdm(range(n_episodes), desc=f"Training {algo_name}", ncols=100):
+        if algo_name == "Linear_Q":
+            ep_return, timestep = agent.learn(env, max_steps=max_steps)
+        elif algo_name == "DQN":
+            ep_return, timestep = agent.learn(env, num_agents=1, max_steps=max_steps)
+        elif algo_name == "MC_REINFORCE":
+            result = agent.learn(env, num_agents=1)
+            ep_return = result[0]
+            timestep = len(result[2]) if len(result) > 2 and result[2] is not None else 0
+        elif algo_name == "AC":
+            result = agent.learn(env, max_steps=max_steps, num_agents=1)
+            ep_return = result[0]
+            timestep = result[2] if len(result) > 2 else 0
+        elif algo_name in ("SAC", "TD3"):
+            ep_return, timestep = agent.learn(env, num_agents=1, max_steps=max_steps)
+        else:
+            raise ValueError(f"Not an episodic algo: {algo_name}")
+
+        global_step += timestep
+        epsilon = getattr(agent, 'epsilon', 0.0) or 0.0
+
+        csv_writer.writerow({
+            "episode": episode,
+            "ep_return": ep_return,
+            "ep_length": timestep,
+            "global_step": global_step,
+            "epsilon": epsilon,
+        })
+
+        # # Live plot (commented out)
+        # agent.plot_durations(timestep)
+
+
+def train_parallel(agent, env, algo_name, cfg, n_episodes, csv_writer, device):
+    """Train parallel-env algorithms (A2C, PPO)."""
+    num_envs = cfg.get("num_envs", 16)
+    num_transitions = cfg["num_transitions_per_env"]
+
+    global_step = 0
+    obs, _ = env.reset()
+
+    # Initialize storage
+    n_obs = obs.shape[-1] if hasattr(obs, 'shape') else 4
+    actions_shape = (agent.num_of_action,) if cfg.get("action_type", "continuous") == "continuous" else (1,)
+    agent._init_storage(num_envs, num_transitions, (n_obs,), actions_shape, device)
+
+    for episode in tqdm(range(n_episodes), desc=f"Training {algo_name}", ncols=100):
+        ep_return = 0.0
+        ep_length = 0
+
+        # Collect rollout
+        with torch.inference_mode():
+            for step in range(num_transitions):
+                actions = agent.act(obs)
+
+                # Clamp continuous actions to action range
+                action_min, action_max = agent.action_range
+                if action_min is not None:
+                    env_actions = actions.clamp(action_min, action_max)
+                else:
+                    env_actions = actions
+
+                next_obs, rewards, terminated, truncated, info = env.step(env_actions)
+                dones = terminated | truncated
+
+                agent.process_env_step(rewards, dones)
+
+                obs = next_obs
+                ep_return += rewards.mean().item()
+                ep_length += 1
+
+            # Bootstrap value at end of rollout
+            agent.compute_returns(obs)
+
+        # Policy update
+        update_info = agent.update()
+        global_step += num_envs * num_transitions
+
+        csv_writer.writerow({
+            "episode": episode,
+            "ep_return": ep_return,
+            "ep_length": ep_length * num_envs,
+            "global_step": global_step,
+            "epsilon": 0.0,
+        })
+
+        # # Live plot (commented out)
+        # agent.plot_durations(ep_length)
+
+
+def deploy(agent, env, algo_name, n_episodes, max_steps, csv_writer, device):
+    """Deploy (evaluate) the trained agent for n_episodes with deterministic policy."""
+    print(f"\n  Deploying {algo_name} for {n_episodes} episodes...")
+
+    for episode in range(n_episodes):
+        obs, _ = env.reset()
+        ep_return = 0.0
+        ep_length = 0
+
+        for step in range(max_steps):
+            with torch.no_grad():
+                if algo_name == "Linear_Q":
+                    obs_np = obs.cpu().numpy().flatten() if torch.is_tensor(obs) else obs.flatten()
+                    q_vals = agent.q(obs_np)
+                    action_idx = int(np.argmax(q_vals))
+                    action = agent.scale_action(action_idx)
+                    if torch.is_tensor(obs):
+                        action = action.to(obs.device)
+                elif algo_name == "DQN":
+                    state = obs if obs.dim() >= 2 else obs.unsqueeze(0)
+                    q_vals = agent.policy_net(state)
+                    action_idx = q_vals.argmax(dim=1).item()
+                    action = agent.scale_action(action_idx).to(device)
+                elif algo_name == "MC_REINFORCE":
+                    state = obs if obs.dim() >= 2 else obs.unsqueeze(0)
+                    if agent.action_type == "continuous":
+                        mean = agent.policy_net(state)
+                        action = mean.clamp(agent.action_range[0], agent.action_range[1])
+                    else:
+                        logits = agent.policy_net(state)
+                        action_idx = logits.argmax(dim=-1).item()
+                        action = agent.scale_action(action_idx).to(device)
+                elif algo_name in ("AC", "A2C", "PPO"):
+                    state = obs if obs.dim() >= 2 else obs.unsqueeze(0)
+                    action = agent.select_action(state)
+                    if agent.action_type == "continuous":
+                        action = action.clamp(agent.action_range[0], agent.action_range[1])
+                elif algo_name == "SAC":
+                    action = agent.select_action(obs, evaluate=True)
+                elif algo_name == "TD3":
+                    action = agent.select_action(obs, add_noise=False)
+
+                next_obs, reward, terminated, truncated, info = env.step(action)
+                done = terminated | truncated
+
+                ep_return += reward.sum().item() if torch.is_tensor(reward) else reward
+                ep_length += 1
+                obs = next_obs
+
+                if done.any() if torch.is_tensor(done) else done:
+                    break
+
+        csv_writer.writerow({
+            "episode": episode,
+            "ep_return": ep_return,
+            "ep_length": ep_length,
+        })
+        print(f"    Episode {episode}: return={ep_return:.1f}, length={ep_length}")
+
+
+# ------------------------------------------------------------------ #
+# Main                                                                 #
+# ------------------------------------------------------------------ #
+
+@hydra_task_config(args_cli.task, "sb3_cfg_entry_point")
+def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg,
+         agent_cfg: RslRlOnPolicyRunnerCfg):
+
+    device = torch.device(
+        "cuda" if torch.cuda.is_available() else
+        "mps" if torch.backends.mps.is_available() else "cpu"
+    )
+    print(f"Device: {device}")
+
+    config = load_config(args_cli.config)
+    shared = config["shared"]
+    n_episodes = shared["n_episodes"]
+    max_steps = 1000
+    task_name = str(args_cli.task).split("-")[0]
+
+    # Output directories
+    exp_dir = os.path.join(ROOT, "experiments", "suite_1_baseline")
+    model_base = os.path.join(ROOT, "model", task_name)
+    os.makedirs(exp_dir, exist_ok=True)
+
+    env_cfg.seed = args_cli.seed
+    env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
+
+    for algo_name in ALGO_ORDER:
+        if algo_name not in config["algorithms"]:
+            print(f"\nSkipping {algo_name} (not in config)")
+            continue
+
+        algo_cfg = config["algorithms"][algo_name]
+        print(f"\n{'='*60}")
+        print(f"  Algorithm: {algo_name}")
+        print(f"{'='*60}")
+
+        # Determine num_envs for this algo
+        if algo_name in ("A2C", "PPO"):
+            num_envs = algo_cfg.get("num_envs", 16)
+        else:
+            num_envs = 1
+
+        # Create environment
+        env = make_env(args_cli.task, env_cfg, num_envs=num_envs)
+
+        # Build agent
+        agent = build_agent(algo_name, algo_cfg, shared, device)
+
+        # Model save directory
+        model_dir = os.path.join(model_base, algo_name)
+        os.makedirs(model_dir, exist_ok=True)
+
+        # ---- Train ---- #
+        train_csv_path = os.path.join(exp_dir, f"{algo_name}.csv")
+        with open(train_csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["episode", "ep_return", "ep_length", "global_step", "epsilon"])
+            writer.writeheader()
+
+            if algo_name in ("A2C", "PPO"):
+                train_parallel(agent, env, algo_name, algo_cfg, n_episodes, writer, device)
+            else:
+                train_episodic(agent, env, algo_name, n_episodes, max_steps, writer, device)
+
+        # Save final model
+        if algo_name == "Linear_Q":
+            agent.save_model(model_dir, f"{algo_name}_final.npy")
+        else:
+            agent.save_model(model_dir, f"{algo_name}_final.pth")
+
+        print(f"  Training complete. Model saved to {model_dir}")
+
+        # ---- Deploy ---- #
+        # For parallel-env algos, recreate env with 1 env for deployment
+        if num_envs > 1:
+            env.close()
+            env = make_env(args_cli.task, env_cfg, num_envs=1)
+
+        deploy_csv_path = os.path.join(exp_dir, f"{algo_name}_deploy.csv")
+        with open(deploy_csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["episode", "ep_return", "ep_length"])
+            writer.writeheader()
+            deploy(agent, env, algo_name, args_cli.deploy_episodes, max_steps, writer, device)
+
+        print(f"  Deployment complete. Results saved to {deploy_csv_path}")
+
+        # Save training summary txt
+        summary_path = os.path.join(exp_dir, f"{algo_name}_summary.txt")
+        with open(summary_path, "w") as f:
+            f.write(f"Algorithm: {algo_name}\n")
+            f.write(f"Task: {args_cli.task}\n")
+            f.write(f"Episodes: {n_episodes}\n")
+            f.write(f"Config: {json.dumps(algo_cfg, indent=2)}\n")
+            f.write(f"Shared: {json.dumps(shared, indent=2)}\n")
+
+        env.close()
+
+    print(f"\n{'='*60}")
+    print("  All experiments complete!")
+    print(f"  Results: {exp_dir}")
+    print(f"{'='*60}")
+
+
+if __name__ == "__main__":
+    main()
+    simulation_app.close()

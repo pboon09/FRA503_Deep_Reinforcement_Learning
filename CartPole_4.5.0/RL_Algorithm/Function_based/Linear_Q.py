@@ -61,7 +61,10 @@ class Linear_QN(BaseAlgorithm):
             float | np.ndarray: Q(s, a) scalar, or Q(s, :) array.
         """
         # ========= put your code here ========= #
-        pass
+        q_all = obs @ self.w  # shape (num_of_action,)
+        if a is None:
+            return q_all
+        return q_all[a]
         # ====================================== #
 
     # ------------------------------------------------------------------ #
@@ -89,7 +92,9 @@ class Linear_QN(BaseAlgorithm):
             terminated (bool): True if the episode ended.
         """
         # ========= put your code here ========= #
-        pass
+        td_target = reward + self.discount_factor * np.max(self.q(next_obs)) * (1 - terminated)
+        td_error = td_target - self.q(obs, action)
+        self.w[:, action] += self.lr * td_error * obs
         # ====================================== #
 
     def select_action(self, state):
@@ -103,7 +108,12 @@ class Linear_QN(BaseAlgorithm):
             Tuple[Tensor, int]: Scaled continuous action tensor and action index.
         """
         # ========= put your code here ========= #
-        pass
+        if np.random.random() < self.epsilon:
+            action_index = np.random.randint(self.num_of_action)
+        else:
+            action_index = int(np.argmax(self.q(state)))
+        scaled_action = self.scale_action(action_index)
+        return scaled_action, action_index
         # ====================================== #
 
     def learn(self, env, max_steps: int):
@@ -118,7 +128,45 @@ class Linear_QN(BaseAlgorithm):
             Tuple[float, int]: (episode_return, timestep)
         """
         # ========= put your code here ========= #
-        pass
+        obs, _ = env.reset()
+        # Convert observation to numpy
+        if isinstance(obs, dict):
+            obs = obs["policy"]
+        if isinstance(obs, torch.Tensor):
+            obs = obs.squeeze().cpu().numpy()
+
+        action, action_index = self.select_action(obs)
+        episode_return = 0.0
+
+        for timestep in range(1, max_steps + 1):
+            next_obs, reward, terminated, truncated, _ = env.step(action)
+
+            # Convert next_obs to numpy
+            if isinstance(next_obs, dict):
+                next_obs = next_obs["policy"]
+            if isinstance(next_obs, torch.Tensor):
+                next_obs = next_obs.squeeze().cpu().numpy()
+
+            reward_value = reward.item() if isinstance(reward, torch.Tensor) else reward
+            terminated_value = terminated.item() if isinstance(terminated, torch.Tensor) else terminated
+            truncated_value = truncated.item() if isinstance(truncated, torch.Tensor) else truncated
+
+            next_action_tensor, next_action_index = self.select_action(next_obs)
+
+            self.update(obs, action_index, reward_value, next_obs, next_action_index, terminated_value)
+
+            episode_return += reward_value
+
+            done = terminated_value or truncated_value
+            if done:
+                break
+
+            obs = next_obs
+            action = next_action_tensor
+            action_index = next_action_index
+
+        self.decay_epsilon()
+        return episode_return, timestep
         # ====================================== #
 
     # ------------------------------------------------------------------ #
@@ -134,7 +182,8 @@ class Linear_QN(BaseAlgorithm):
             filename (str): File name (e.g., 'linear_q_cartpole.npy').
         """
         # ========= put your code here ========= #
-        pass
+        os.makedirs(path, exist_ok=True)
+        np.save(os.path.join(path, filename), self.w)
         # ====================================== #
 
     def load_model(self, path: str, filename: str) -> None:
@@ -146,5 +195,5 @@ class Linear_QN(BaseAlgorithm):
             filename (str): File name (e.g., 'linear_q_cartpole.npy').
         """
         # ========= put your code here ========= #
-        pass
+        self.w = np.load(os.path.join(path, filename))
         # ====================================== #
