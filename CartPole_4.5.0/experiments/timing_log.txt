@@ -1,28 +1,10 @@
 ============================================================
-Run started at 2026-03-26 17:09:04
-Suites: {'DEPLOY', 'TRAIN'}
+Run started at 2026-03-26 21:49:03
+Suites: {'PLOTS'}
 Algo envs: {'PPO': 256, 'AC': 8, 'MC_REINFORCE': 16, 'DQN': 32, 'Linear_Q': 32}
 ============================================================
 
-[TRAIN] MC_REINFORCE (num_envs=16) started at 2026-03-26 17:09:04
-[TRAIN] MC_REINFORCE finished at 2026-03-26 17:50:34 | elapsed 41.5 min | OK
-
-[TRAIN] DQN (num_envs=32) started at 2026-03-26 17:50:34
-[TRAIN] DQN finished at 2026-03-26 19:37:37 | elapsed 107.0 min | OK
-
-[TRAIN] AC (num_envs=8) started at 2026-03-26 19:37:37
-[TRAIN] AC finished at 2026-03-26 21:43:54 | elapsed 126.3 min | OK
-
-[DEPLOY] MC_REINFORCE started at 2026-03-26 21:43:54
-[DEPLOY] MC_REINFORCE finished at 2026-03-26 21:44:26 | elapsed 31.7 sec | OK
-
-[DEPLOY] DQN started at 2026-03-26 21:44:26
-[DEPLOY] DQN finished at 2026-03-26 21:44:59 | elapsed 32.9 sec | OK
-
-[DEPLOY] AC started at 2026-03-26 21:44:59
-[DEPLOY] AC finished at 2026-03-26 21:45:31 | elapsed 31.6 sec | OK
-
 ============================================================
-All done at 2026-03-26 21:45:31
+All done at 2026-03-26 21:49:11
 ============================================================
 
