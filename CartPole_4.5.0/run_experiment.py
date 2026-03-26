@@ -410,7 +410,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg,
 
     config = load_config(args_cli.config)
     shared = config["shared"]
-    n_episodes = shared["n_episodes"]
     num_envs = shared.get("num_envs", args_cli.num_envs)
     task_name = str(args_cli.task).split("-")[0]
 
@@ -428,8 +427,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg,
             continue
 
         algo_cfg = config["algorithms"][algo_name]
+        n_episodes = algo_cfg.get("n_episodes", 1000)
         print(f"\n{'='*60}")
-        print(f"  Algorithm: {algo_name} ({num_envs} parallel envs)")
+        print(f"  Algorithm: {algo_name} ({num_envs} envs, {n_episodes} episodes)")
         print(f"{'='*60}")
 
         # Create environment with 256 parallel envs for training
@@ -478,7 +478,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg,
             f.write(f"Algorithm: {algo_name}\n")
             f.write(f"Task: {args_cli.task}\n")
             f.write(f"Num Envs: {num_envs}\n")
-            f.write(f"Episodes: {n_episodes}\n")
+            f.write(f"Episodes: {algo_cfg.get('n_episodes', 1000)}\n")
             f.write(f"Config: {json.dumps(algo_cfg, indent=2)}\n")
             f.write(f"Shared: {json.dumps(shared, indent=2)}\n")
 

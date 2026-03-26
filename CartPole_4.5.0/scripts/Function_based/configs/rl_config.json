@@ -1,14 +1,13 @@
 {
     "shared": {
-        "n_episodes": 5000,
         "n_observations": 4,
         "action_range": [-2.5, 2.5],
         "discount_factor": 0.99,
-        "num_envs": 256,
-        "max_steps": 200
+        "num_envs": 256
     },
     "algorithms": {
         "Linear_Q": {
+            "n_episodes": 1000,
             "num_of_action": 11,
             "learning_rate": 0.01,
             "lr_decay": 0.9995,
@@ -18,6 +17,7 @@
             "max_steps": 200
         },
         "DQN": {
+            "n_episodes": 100,
             "num_of_action": 11,
             "hidden_dim": 256,
             "dropout": 0.1,
@@ -31,6 +31,7 @@
             "max_steps": 200
         },
         "MC_REINFORCE": {
+            "n_episodes": 200,
             "num_of_action": 1,
             "hidden_dim": 256,
             "dropout": 0.1,
@@ -39,6 +40,7 @@
             "max_steps": 600
         },
         "AC": {
+            "n_episodes": 1000,
             "num_of_action": 1,
             "hidden_dims": [256, 256],
             "activation": "elu",
@@ -48,9 +50,11 @@
             "value_loss_coef": 0.5,
             "entropy_coef": 0.01,
             "max_grad_norm": 0.5,
-            "num_transitions_per_env": 20
+            "num_transitions_per_env": 20,
+            "max_steps": 20
         },
         "A2C": {
+            "n_episodes": 1000,
             "num_of_action": 1,
             "hidden_dims": [256, 256],
             "activation": "elu",
@@ -63,6 +67,7 @@
             "num_transitions_per_env": 32
         },
         "PPO": {
+            "n_episodes": 1000,
             "num_of_action": 1,
             "hidden_dims": [256, 256],
             "activation": "elu",
@@ -80,6 +85,7 @@
             "desired_kl": 0.0
         },
         "SAC": {
+            "n_episodes": 100,
             "num_of_action": 1,
             "hidden_dim": 256,
             "learning_rate": 0.001,
@@ -93,6 +99,7 @@
             "max_steps": 200
         },
         "TD3": {
+            "n_episodes": 100,
             "num_of_action": 1,
             "hidden_dim": 256,
             "learning_rate": 0.0005,
