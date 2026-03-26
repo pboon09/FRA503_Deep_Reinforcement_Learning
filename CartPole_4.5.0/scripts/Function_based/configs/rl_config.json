@@ -32,10 +32,10 @@
             "hidden_dim": 64,
             "dropout": 0.0,
             "action_type": "continuous",
-            "learning_rate": 0.0003,
-            "rollout_steps": 1024,
+            "learning_rate": 0.0005,
+            "rollout_steps": 64,
             "entropy_coef": 0.01,
-            "num_epochs": 4,
+            "num_epochs": 1,
             "value_loss_coef": 0.5
         },
         "AC": {
@@ -48,7 +48,7 @@
             "value_loss_coef": 0.5,
             "entropy_coef": 0.01,
             "max_grad_norm": 0.5,
-            "rollout_steps": 64,
+            "rollout_steps": 16,
             "num_epochs": 1
         },
         "PPO": {

@@ -117,11 +117,12 @@ class MC_REINFORCE(BaseAlgorithm):
                     dist = self._get_distribution(state)
                     action, _ = self._sample_action(dist)
 
+                    actions_buf.append(action)
+
                     if self.action_type == "continuous":
                         env_action = torch.clamp(action, self.action_range[0], self.action_range[1])
                     else:
                         env_action = action.float()
-                    actions_buf.append(env_action)
 
                     next_obs, reward, terminated, truncated, _ = env.step(env_action)
                     done = (terminated | truncated).float().to(self.device)
@@ -153,8 +154,9 @@ class MC_REINFORCE(BaseAlgorithm):
             rewards = torch.stack(rewards_buf)          # (T, N)
             dones = torch.stack(dones_buf)              # (T, N)
 
-            # Compute MC returns (no grad needed)
-            G = torch.zeros(num_agents, device=self.device)
+            # Compute MC returns -- bootstrap incomplete episodes from V(s_T)
+            with torch.no_grad():
+                G = self.value_net(state).squeeze(-1)  # V(s_T) for incomplete episodes
             returns = torch.zeros(T, num_agents, device=self.device)
             for t in reversed(range(T)):
                 G = rewards[t] + self.discount_factor * G * (1.0 - dones[t])

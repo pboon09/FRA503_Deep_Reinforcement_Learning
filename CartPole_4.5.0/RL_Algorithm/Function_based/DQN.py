@@ -53,6 +53,7 @@ class DQN(OffPolicyAlgorithm):
         self.num_of_action = num_of_action
         self.tau = tau
         self.optimizer = optim.AdamW(self.policy_net.parameters(), lr=learning_rate, amsgrad=True)
+        self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=50000, gamma=0.5)
 
         super(DQN, self).__init__(
             num_of_action=num_of_action,
@@ -186,6 +187,7 @@ class DQN(OffPolicyAlgorithm):
             if global_step >= self.learning_starts:
                 self.update_policy()
                 self.update_target_networks()
+                self.scheduler.step()
             state = next_state
 
             if total_episodes - last_log >= 100 and total_episodes > 0:
