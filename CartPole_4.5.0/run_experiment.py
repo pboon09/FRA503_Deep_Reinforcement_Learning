@@ -20,7 +20,10 @@ import time
 
 from isaaclab.app import AppLauncher
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__))))
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__)))
+sys.path.insert(0, _PROJECT_ROOT)
+sys.path.insert(0, os.path.join(_PROJECT_ROOT, "RL_Algorithm"))
+sys.path.insert(0, os.path.join(_PROJECT_ROOT, "source", "CartPole"))
 
 # ------------------------------------------------------------------ #
 # CLI arguments                                                        #
