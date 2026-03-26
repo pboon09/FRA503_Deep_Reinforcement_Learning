@@ -339,14 +339,14 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
 
         for iteration in range(n_iters):
             with torch.no_grad():
-                for _ in range(num_transitions):
+                for t_step in range(num_transitions):
                     actions = agent.act(obs)
                     action_min, action_max = agent.action_range
                     if action_min is not None and action_type == "continuous":
                         env_actions = actions.clamp(action_min, action_max)
                     else:
                         env_actions = actions
-                    next_obs, rewards, terminated, truncated, _ = env.step(env_actions)
+                    next_obs, rewards, terminated, truncated, _info = env.step(env_actions)
                     next_obs = extract_obs(next_obs)
                     dones = terminated | truncated
                     agent.process_env_step(rewards, dones)
@@ -359,7 +359,7 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                     if done_mask.any():
                         done_idx = done_mask.nonzero(as_tuple=True)[0]
                         for idx in done_idx:
-                            global_step_now = (iteration * num_transitions + _ + 1) * num_envs
+                            global_step_now = (iteration * num_transitions + t_step + 1) * num_envs
                             csv_writer.writerow({
                                 "episode": completed,
                                 "ep_return": ep_returns[idx].item(),
