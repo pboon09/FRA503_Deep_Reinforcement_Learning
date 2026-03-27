@@ -40,6 +40,8 @@ parser.add_argument("--config", type=str,
                     help="Path to rl_config.json.")
 parser.add_argument("--deploy_episodes", type=int, default=10,
                     help="Number of deployment (evaluation) episodes.")
+parser.add_argument("--algo", type=str, default=None,
+                    help="Run only this algorithm (e.g. --algo SAC). Runs all if omitted.")
 
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
@@ -257,12 +259,14 @@ def build_agent(algo_name: str, cfg: dict, shared: dict, device: torch.device):
 def _select_action_batch(agent, algo_name, obs, device):
     """Select actions for all 256 envs in one batch call."""
     if algo_name == "Linear_Q":
-        if hasattr(agent, '_w_gpu') and agent._w_gpu is not None:
-            all_q = obs @ agent._w_gpu
-        else:
+        # Initialise GPU tensors on first call
+        if not (hasattr(agent, '_w_gpu') and agent._w_gpu is not None):
             agent._w_gpu = torch.tensor(agent.w, dtype=torch.float32, device=device)
             agent._device = device
-            all_q = obs @ agent._w_gpu
+        if not hasattr(agent, '_obs_scale_gpu') or agent._obs_scale_gpu is None:
+            agent._obs_scale_gpu = torch.tensor(agent.obs_scale, dtype=torch.float32, device=device)
+        obs_norm = obs / agent._obs_scale_gpu
+        all_q = obs_norm @ agent._w_gpu
         greedy = all_q.argmax(dim=1)
         rand = torch.randint(0, agent.num_of_action, (obs.shape[0],), device=device)
         mask = torch.rand(obs.shape[0], device=device) < agent.epsilon
@@ -404,17 +408,19 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
 
             # --- Algorithm-specific per-step logic ---
             if algo_name == "Linear_Q":
-                # Vectorized TD update on GPU
+                # Vectorized TD update on GPU (with obs normalization)
                 indices = extra  # action indices
-                next_q = next_obs @ agent._w_gpu
+                obs_norm      = obs      / agent._obs_scale_gpu
+                next_obs_norm = next_obs / agent._obs_scale_gpu
+                next_q = next_obs_norm @ agent._w_gpu
                 next_max = next_q.max(dim=1).values
-                cur_q = (obs @ agent._w_gpu).gather(1, indices.unsqueeze(1)).squeeze(1)
+                cur_q = (obs_norm @ agent._w_gpu).gather(1, indices.unsqueeze(1)).squeeze(1)
                 td_target = reward + agent.discount_factor * next_max * (~terminated).float()
                 td_error = (td_target - cur_q).clamp(-5.0, 5.0)
                 for a in range(agent.num_of_action):
                     mask = (indices == a)
                     if mask.any():
-                        grads = agent.lr * td_error[mask].unsqueeze(1) * obs[mask]
+                        grads = agent.lr * td_error[mask].unsqueeze(1) * obs_norm[mask]
                         agent._w_gpu[:, a] += grads.mean(dim=0)
                 agent.decay_epsilon()
 
@@ -505,9 +511,8 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                 for i in range(num_envs):
                     agent.store_transition(obs[i], raw[i], float(rew_cpu[i]),
                                            next_obs[i], float(done_cpu[i]))
-                # SAC: UTD=8 is stable due to entropy regularisation
-                for _ in range(8):
-                    agent.update_policy()
+                # SAC: UTD=1 (256 parallel envs already give dense data)
+                agent.update_policy()
 
             elif algo_name == "TD3":
                 a_min, a_max = agent.action_range
@@ -575,12 +580,14 @@ def deploy(agent, env, algo_name, n_episodes, max_steps, csv_writer, device):
     while completed < n_episodes:
         with torch.no_grad():
             if algo_name == "Linear_Q":
-                # Use GPU weights if available, else numpy
+                # Use GPU weights if available, else numpy (with obs normalization)
                 if hasattr(agent, '_w_gpu') and agent._w_gpu is not None:
-                    all_q = obs @ agent._w_gpu
+                    if not hasattr(agent, '_obs_scale_gpu') or agent._obs_scale_gpu is None:
+                        agent._obs_scale_gpu = torch.tensor(agent.obs_scale, dtype=torch.float32, device=device)
+                    all_q = (obs / agent._obs_scale_gpu) @ agent._w_gpu
                 else:
                     obs_np = obs.cpu().numpy()
-                    q_np = obs_np @ agent.w
+                    q_np = (obs_np / agent.obs_scale) @ agent.w
                     all_q = torch.tensor(q_np, device=device)
                 action_indices = all_q.argmax(dim=1)
                 action_min, action_max = agent.action_range
@@ -674,7 +681,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg,
     # Create ONE environment and reuse for all algorithms (don't close/recreate)
     env = make_env(args_cli.task, env_cfg, num_envs=num_envs)
 
-    for algo_name in ALGO_ORDER:
+    algo_filter = [args_cli.algo] if args_cli.algo else ALGO_ORDER
+    for algo_name in algo_filter:
         if algo_name not in config["algorithms"]:
             print(f"\nSkipping {algo_name} (not in config)")
             continue

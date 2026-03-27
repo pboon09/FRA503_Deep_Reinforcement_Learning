@@ -233,7 +233,11 @@ class ReplayBuffer:
     """
 
     def __init__(self, buffer_size: int, batch_size: int = 1) -> None:
-        self.memory     = deque(maxlen=buffer_size)
+        # Pre-allocated circular list for O(1) random access (deque is O(n))
+        self._storage   = [None] * buffer_size
+        self._maxlen    = buffer_size
+        self._ptr       = 0    # next write position
+        self._size      = 0    # current fill level
         self.batch_size = batch_size
 
     def add(
@@ -256,7 +260,9 @@ class ReplayBuffer:
             next_state: Resulting next state.
             done (bool): True if the episode terminated after this step.
         """
-        self.memory.append(_Transition(state, action, reward, next_state, done))
+        self._storage[self._ptr] = _Transition(state, action, reward, next_state, done)
+        self._ptr  = (self._ptr + 1) % self._maxlen
+        self._size = min(self._size + 1, self._maxlen)
 
     def sample(self) -> list[_Transition] | None:
         """
@@ -269,14 +275,15 @@ class ReplayBuffer:
             list[Transition] | None: ``batch_size`` randomly drawn
             Transition named-tuples, or None if not enough data yet.
         """
-        if len(self.memory) < self.batch_size:
+        if self._size < self.batch_size:
             return None
-        return random.sample(self.memory, self.batch_size)
+        indices = random.sample(range(self._size), self.batch_size)
+        return [self._storage[i] for i in indices]
 
     def is_ready(self) -> bool:
         """Return True once the buffer holds at least ``batch_size`` entries."""
-        return len(self.memory) >= self.batch_size
+        return self._size >= self.batch_size
 
     def __len__(self) -> int:
         """Current number of stored transitions."""
-        return len(self.memory)
+        return self._size

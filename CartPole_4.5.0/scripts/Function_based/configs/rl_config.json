@@ -26,8 +26,8 @@
             "epsilon_decay": 5e-5,
             "final_epsilon": 0.05,
             "buffer_size": 1000000,
-            "batch_size": 256,
-            "learning_starts": 1000,
+            "batch_size": 128,
+            "learning_starts": 5000,
             "total_steps": 20000
         },
         "MC_REINFORCE": {
@@ -35,7 +35,7 @@
             "hidden_dim": 64,
             "dropout": 0.0,
             "action_type": "continuous",
-            "learning_rate": 0.001,
+            "learning_rate": 0.0005,
             "total_steps": 20000
         },
         "AC": {
@@ -84,11 +84,11 @@
         "SAC": {
             "num_of_action": 1,
             "hidden_dim": 256,
-            "learning_rate": 0.00045,
-            "alpha_lr": 0.001,
-            "tau": 0.002,
-            "buffer_size": 2000000,
-            "batch_size": 512,
+            "learning_rate": 0.0003,
+            "alpha_lr": 0.0003,
+            "tau": 0.005,
+            "buffer_size": 1000000,
+            "batch_size": 256,
             "init_alpha": 0.2,
             "auto_alpha": true,
             "target_entropy": null,
