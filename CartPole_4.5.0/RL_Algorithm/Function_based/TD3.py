@@ -153,6 +153,7 @@ class TD3(OffPolicyAlgorithm):
             target_noise: float = None,
             target_noise_clip: float = None,
             policy_update_freq: int = None,
+            learning_starts: int = 1000,
     ) -> None:
 
         # Feel free to add or modify any of the initialized variables above.
@@ -175,6 +176,7 @@ class TD3(OffPolicyAlgorithm):
         self.target_noise_clip  = target_noise_clip
         self.policy_update_freq = policy_update_freq
         self.total_steps        = 0   # counts critic updates to trigger delayed actor update
+        self.learning_starts    = learning_starts
         pass
         # ====================================== #
 

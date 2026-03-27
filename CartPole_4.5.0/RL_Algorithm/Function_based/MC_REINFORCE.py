@@ -56,9 +56,9 @@ class MC_REINFORCE_network(nn.Module):
         # ====================================== #
 
         # ===== Learnable log_std (continuous only) ===== #
-        # Initialise to 0 so std starts at exp(0) = 1.0
+        # Initialise to -0.5 so std starts at exp(-0.5) ≈ 0.61 for focused exploration
         if self.action_type == "continuous":
-            self.log_std = nn.Parameter(torch.zeros(n_actions))
+            self.log_std = nn.Parameter(torch.full((n_actions,), -0.5))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -77,6 +77,33 @@ class MC_REINFORCE_network(nn.Module):
         # ========= put your code here ========= #
         return self.body(x)
         # ====================================== #
+
+
+# ============================================================ #
+# ==================== Value Network ========================= #
+# ============================================================ #
+
+class MC_REINFORCE_value_network(nn.Module):
+    """
+    Value (baseline) network for MC REINFORCE.
+
+    Args:
+        n_observations (int): Number of input features.
+        hidden_size (int): Number of hidden neurons per layer.
+    """
+
+    def __init__(self, n_observations: int, hidden_size: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(n_observations, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, 1),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x).squeeze(-1)
 
 
 # ============================================================ #
@@ -112,6 +139,8 @@ class MC_REINFORCE(BaseAlgorithm):
             action_type: str = None,
             learning_rate: float = None,
             discount_factor: float = None,
+            entropy_coef: float = 0.01,
+            value_loss_coef: float = 0.5,
     ) -> None:
 
         assert action_type in ("discrete", "continuous"), \
@@ -119,13 +148,19 @@ class MC_REINFORCE(BaseAlgorithm):
 
         # Feel free to add or modify any of the initialized variables above.
         # ========= put your code here ========= #
-        self.action_type = action_type
-        self.LR          = learning_rate
+        self.action_type     = action_type
+        self.LR              = learning_rate
+        self.entropy_coef    = entropy_coef
+        self.value_loss_coef = value_loss_coef
 
         self.policy_net = MC_REINFORCE_network(
             n_observations, hidden_dim, num_of_action, dropout, action_type
         ).to(device)
-        self.optimizer  = optim.AdamW(self.policy_net.parameters(), lr=learning_rate)
+        self.value_net = MC_REINFORCE_value_network(n_observations, hidden_dim).to(device)
+        self.optimizer = optim.AdamW(
+            list(self.policy_net.parameters()) + list(self.value_net.parameters()),
+            lr=learning_rate,
+        )
 
         self.device     = device
         self.steps_done = 0
@@ -273,19 +308,38 @@ class MC_REINFORCE(BaseAlgorithm):
         self,
         stepwise_returns: torch.Tensor,
         log_prob_actions: torch.Tensor,
+        states: torch.Tensor = None,
     ) -> torch.Tensor:
         """
-        Compute REINFORCE policy gradient loss.
+        Compute REINFORCE policy gradient loss with optional value baseline and entropy.
 
         Args:
-            stepwise_returns (Tensor): shape ``(T,)``.
+            stepwise_returns (Tensor): Normalised discounted returns, shape ``(T,)``.
             log_prob_actions (Tensor): shape ``(T,)``.
+            states (Tensor | None): Episode observations ``(T, obs_dim)``.
+                When provided, computes a value-function baseline and adds an
+                entropy bonus to reduce variance and encourage exploration.
 
         Returns:
             Tensor: Scalar loss.
         """
         # ========= put your code here ========= #
-        loss = -(log_prob_actions * stepwise_returns).mean()
+        if states is not None:
+            values = self.value_net(states)
+            advantages = stepwise_returns - values.detach()
+            value_loss = F.mse_loss(values, stepwise_returns)
+            dist = self._get_distribution(states)
+            entropy = dist.entropy()
+            if self.action_type == "continuous":
+                entropy = entropy.sum(-1)
+            entropy = entropy.mean()
+        else:
+            advantages = stepwise_returns
+            value_loss = torch.zeros(1, device=self.device).squeeze()
+            entropy = torch.zeros(1, device=self.device).squeeze()
+
+        policy_loss = -(log_prob_actions * advantages).mean()
+        loss = policy_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy
         return loss
         # ====================================== #
 
@@ -293,21 +347,25 @@ class MC_REINFORCE(BaseAlgorithm):
         self,
         stepwise_returns: torch.Tensor,
         log_prob_actions: torch.Tensor,
+        states: torch.Tensor = None,
     ) -> float:
         """
-        Backpropagate the REINFORCE loss and update the policy network.
+        Backpropagate the REINFORCE loss and update the policy and value networks.
 
         Args:
             stepwise_returns (Tensor): shape ``(T,)``.
             log_prob_actions (Tensor): shape ``(T,)``.
+            states (Tensor | None): Episode observations for baseline/entropy.
 
         Returns:
             float: Loss value after the update.
         """
         # ========= put your code here ========= #
-        loss = self.calculate_loss(stepwise_returns, log_prob_actions)
+        loss = self.calculate_loss(stepwise_returns, log_prob_actions, states)
         self.optimizer.zero_grad()
         loss.backward()
+        nn.utils.clip_grad_norm_(self.policy_net.parameters(), 0.5)
+        nn.utils.clip_grad_norm_(self.value_net.parameters(), 0.5)
         self.optimizer.step()
         return loss.item()
         # ====================================== #

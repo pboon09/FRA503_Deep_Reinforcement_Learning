@@ -44,6 +44,10 @@ class Linear_QN(BaseAlgorithm):
         # Shape: (obs_feature_dim, num_of_action)
         self.w = np.zeros((4, num_of_action))
 
+        # Observation scale for normalization: [cart_pos, cart_vel, pole_angle, pole_vel]
+        # CartPole obs ranges: pos~±3, vel~±10, angle~±0.42rad, ang_vel~±5
+        self.obs_scale = np.array([3.0, 0.419, 5.0, 5.0], dtype=np.float32)
+
         # GPU version of weights (created lazily in learn())
         self._w_gpu = None
         self._device = None
@@ -113,10 +117,11 @@ class Linear_QN(BaseAlgorithm):
             Tuple[Tensor, int]: Scaled continuous action tensor and action index.
         """
         # ========= put your code here ========= #
+        state_norm = state / self.obs_scale
         if np.random.random() < self.epsilon:
             action_index = np.random.randint(self.num_of_action)
         else:
-            action_index = int(np.argmax(self.q(state)))
+            action_index = int(np.argmax(self.q(state_norm)))
         scaled_action = self.scale_action(action_index)
         return scaled_action, action_index
         # ====================================== #
@@ -146,6 +151,10 @@ class Linear_QN(BaseAlgorithm):
         if self._w_gpu is None or self._device != device:
             self._device = device
         self._w_gpu = torch.tensor(self.w, dtype=torch.float32, device=device)
+        obs_scale_gpu = torch.tensor(self.obs_scale, dtype=torch.float32, device=device)
+
+        # Normalize initial observations
+        obs = obs / obs_scale_gpu
 
         # Per-env tracking (all on GPU)
         env_returns = torch.zeros(num_agents, device=device)
@@ -170,6 +179,7 @@ class Linear_QN(BaseAlgorithm):
             next_obs, reward, terminated, truncated, _ = env.step(scaled.unsqueeze(-1))
             if isinstance(next_obs, dict):
                 next_obs = next_obs["policy"]
+            next_obs = next_obs / obs_scale_gpu
             done = (terminated | truncated).bool()
 
             # --- Vectorized TD update on GPU ---

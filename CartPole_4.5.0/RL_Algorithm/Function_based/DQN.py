@@ -85,6 +85,7 @@ class DQN(OffPolicyAlgorithm):
             discount_factor: float = None,
             buffer_size: int = None,
             batch_size: int = None,
+            learning_starts: int = 1000,
     ) -> None:
 
         # Feel free to add or modify any of the initialized variables above.
@@ -93,10 +94,11 @@ class DQN(OffPolicyAlgorithm):
         self.target_net = DQN_network(n_observations, hidden_dim, num_of_action, dropout).to(device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
 
-        self.device        = device
-        self.steps_done    = 0
-        self.num_of_action = num_of_action
-        self.tau           = tau
+        self.device         = device
+        self.steps_done     = 0
+        self.num_of_action  = num_of_action
+        self.tau            = tau
+        self.learning_starts = learning_starts
 
         self.optimizer = optim.AdamW(self.policy_net.parameters(), lr=learning_rate, amsgrad=True)
         pass

@@ -143,6 +143,7 @@ def build_agent(algo_name: str, cfg: dict, shared: dict, device: torch.device):
             discount_factor=gamma,
             buffer_size=ac["buffer_size"],
             batch_size=ac["batch_size"],
+            learning_starts=ac.get("learning_starts", 1000),
         )
     elif algo_name == "MC_REINFORCE":
         return MC_REINFORCE(
@@ -242,6 +243,7 @@ def build_agent(algo_name: str, cfg: dict, shared: dict, device: torch.device):
             target_noise=ac.get("target_noise", 0.2),
             target_noise_clip=ac.get("target_noise_clip", 0.5),
             policy_update_freq=ac.get("policy_update_freq", 2),
+            learning_starts=ac.get("learning_starts", 1000),
         )
     else:
         raise ValueError(f"Unknown algorithm: {algo_name}")
@@ -425,10 +427,10 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                     ns = None if done_cpu[i] else next_obs[i]
                     agent.store_transition(obs[i], int(indices[i].item()), float(rew_cpu[i]),
                                            ns, bool(term_cpu[i]))
-                # Multiple gradient steps per env step (replay ratio scaling)
-                for _ in range(8):
+                # Single gradient step (UTD=1) after learning_starts warmup
+                if step >= agent.learning_starts:
                     agent.update_policy()
-                agent.update_target_networks()
+                    agent.update_target_networks()
                 agent.decay_epsilon()
 
             elif algo_name == "MC_REINFORCE":
@@ -449,7 +451,7 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                         else:
                             lp = dist.log_prob(ep_act.squeeze(-1))
                         returns = agent.calculate_stepwise_returns(env_rewards[i])
-                        loss = agent.calculate_loss(returns, lp) / update_every
+                        loss = agent.calculate_loss(returns, lp, ep_obs) / update_every
                         loss.backward()
                         num_updates += 1
                     if done_cpu[i]:
@@ -457,6 +459,9 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                         env_actions[i] = []
                         env_rewards[i] = []
                 if num_updates >= update_every:
+                    torch.nn.utils.clip_grad_norm_(agent.policy_net.parameters(), 0.5)
+                    if hasattr(agent, 'value_net'):
+                        torch.nn.utils.clip_grad_norm_(agent.value_net.parameters(), 0.5)
                     agent.optimizer.step()
                     agent.optimizer.zero_grad()
                     num_updates = 0
@@ -492,7 +497,7 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                     agent.optimizer.zero_grad()
                     num_updates = 0
 
-            elif algo_name in ("SAC", "TD3"):
+            elif algo_name == "SAC":
                 a_min, a_max = agent.action_range
                 raw = (env_action - a_min) / (a_max - a_min) * 2.0 - 1.0
                 rew_cpu = reward.cpu().numpy()
@@ -500,8 +505,20 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                 for i in range(num_envs):
                     agent.store_transition(obs[i], raw[i], float(rew_cpu[i]),
                                            next_obs[i], float(done_cpu[i]))
-                # Multiple gradient steps per env step (replay ratio scaling)
+                # SAC: UTD=8 is stable due to entropy regularisation
                 for _ in range(8):
+                    agent.update_policy()
+
+            elif algo_name == "TD3":
+                a_min, a_max = agent.action_range
+                raw = (env_action - a_min) / (a_max - a_min) * 2.0 - 1.0
+                rew_cpu = reward.cpu().numpy()
+                done_cpu = done.float().cpu().numpy()
+                for i in range(num_envs):
+                    agent.store_transition(obs[i], raw[i], float(rew_cpu[i]),
+                                           next_obs[i], float(done_cpu[i]))
+                # TD3: UTD=1 after learning_starts (deterministic actor is fragile at high UTD)
+                if step >= agent.learning_starts:
                     agent.update_policy()
 
             # --- Track completed episodes ---
@@ -530,6 +547,12 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
 
         # Final gradient step for MC algorithms (flush accumulated grads)
         if algo_name in ("MC_REINFORCE", "AC") and num_updates > 0:
+            if algo_name == "MC_REINFORCE":
+                torch.nn.utils.clip_grad_norm_(agent.policy_net.parameters(), 0.5)
+                if hasattr(agent, 'value_net'):
+                    torch.nn.utils.clip_grad_norm_(agent.value_net.parameters(), 0.5)
+            elif algo_name == "AC":
+                torch.nn.utils.clip_grad_norm_(agent.policy.parameters(), agent.max_grad_norm)
             agent.optimizer.step()
             agent.optimizer.zero_grad()
 

@@ -281,16 +281,17 @@ class A2C(OnPolicyAlgorithm):
 
     def compute_returns(self, last_obs: torch.Tensor) -> None:
         """
-        Compute one-step TD advantages and returns over the rollout.
+        Compute n-step returns and advantages over the rollout using GAE with λ=1.0.
 
-        A2C uses the simpler TD advantage instead of GAE:
+        A2C uses GAE with λ=1.0 (SB3 canonical), which accumulates TD deltas
+        across all rollout steps — equivalent to n-step returns:
 
             δ_t = r_t + γ · V(s_{t+1}) · (1 − done) − V(s_t)
+            A_t = δ_t + γ · λ · (1 − done) · A_{t+1}   with λ=1.0
 
-        Unlike PPO which accumulates δ with a λ trace, A2C uses δ directly
-        as the advantage without any multi-step lookahead correction.
+        This gives every step a multi-step lookahead, providing much better
+        credit assignment than 1-step TD for tasks requiring long-horizon planning.
 
-            A_t = δ_t
             R_t = A_t + V(s_t)
 
         Args:
@@ -303,6 +304,8 @@ class A2C(OnPolicyAlgorithm):
         last_value = self.policy.evaluate(last_obs).detach()
         # ====================================== #
 
+        advantage = torch.zeros_like(last_value)
+
         for step in reversed(range(self.storage.num_transitions_per_env)):
 
             # ===== TD delta: r + γ·V(s')·(1-done) - V(s) ===== #
@@ -314,9 +317,10 @@ class A2C(OnPolicyAlgorithm):
             delta = self.storage.rewards[step] + self.discount_factor * next_values * (1 - self.storage.dones[step]) - self.storage.values[step]
             # ====================================== #
 
-            # ===== A2C: advantage = delta (no lambda accumulation) ===== #
+            # ===== A2C with λ=1.0: accumulate delta across rollout (n-step returns) ===== #
             # ========= put your code here ========= #
-            self.storage.advantages[step] = delta
+            advantage = delta + self.discount_factor * 1.0 * (1 - self.storage.dones[step]) * advantage
+            self.storage.advantages[step] = advantage
             # ====================================== #
 
             # ===== Return = advantage + V(s) ===== #

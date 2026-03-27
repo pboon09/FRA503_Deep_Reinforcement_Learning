@@ -201,6 +201,9 @@ class AC(OnPolicyAlgorithm):
             action_type=action_type,
             init_noise_std=init_noise_std,
         ).to(self.device)
+        # Orthogonal weight initialisation for training stability
+        self.policy.actor.init_weights(scales=1.0)
+        self.policy.critic.init_weights(scales=1.0)
         # ====================================== #
 
         self.optimizer       = optim.Adam(self.policy.parameters(), lr=learning_rate)
@@ -323,6 +326,12 @@ class AC(OnPolicyAlgorithm):
         advantages = returns - values.detach()
         actor_loss = -(log_prob_actions * advantages).mean()
         critic_loss = F.mse_loss(values, returns)
+        # Entropy bonus: subtract entropy from loss so maximising entropy reduces total loss
+        if self.policy.distribution is not None:
+            entropy = self.policy.entropy.mean()
+        else:
+            entropy = torch.zeros(1, device=self.device).squeeze()
+        actor_loss = actor_loss - self.entropy_coef * entropy
         return actor_loss, critic_loss
         # ====================================== #
 
