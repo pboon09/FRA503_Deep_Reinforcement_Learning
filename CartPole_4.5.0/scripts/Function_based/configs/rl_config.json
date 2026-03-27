@@ -18,15 +18,15 @@
         },
         "DQN": {
             "num_of_action": 11,
-            "hidden_dim": 256,
-            "dropout": 0.1,
-            "learning_rate": 0.0002,
+            "hidden_dim": 128,
+            "dropout": 0.0,
+            "learning_rate": 0.0001,
             "tau": 0.005,
             "initial_epsilon": 1.0,
-            "epsilon_decay": 5e-4,
-            "final_epsilon": 0.01,
+            "epsilon_decay": 4.8e-6,
+            "final_epsilon": 0.04,
             "buffer_size": 1000000,
-            "batch_size": 256,
+            "batch_size": 128,
             "total_steps": 20000
         },
         "MC_REINFORCE": {
@@ -35,7 +35,7 @@
             "dropout": 0.0,
             "action_type": "continuous",
             "learning_rate": 0.0005,
-            "total_steps": 40000
+            "total_steps": 20000
         },
         "AC": {
             "num_of_action": 1,
@@ -60,7 +60,7 @@
             "entropy_coef": 0.05,
             "max_grad_norm": 1.0,
             "num_transitions_per_env": 64,
-            "total_steps": 40000
+            "total_steps": 20000
         },
         "PPO": {
             "num_of_action": 1,
