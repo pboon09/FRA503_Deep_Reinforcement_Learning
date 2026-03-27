@@ -662,21 +662,22 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg,
         print(f"  Algorithm: {algo_name} ({num_envs} envs, {t_steps} batch steps)")
         print(f"{'='*60}")
 
-        # Build agent
-        agent = build_agent(algo_name, algo_cfg, shared, device)
+        try:
+            # Build agent
+            agent = build_agent(algo_name, algo_cfg, shared, device)
 
-        # Model save directory
-        model_dir = os.path.join(model_base, algo_name)
-        os.makedirs(model_dir, exist_ok=True)
+            # Model save directory
+            model_dir = os.path.join(model_base, algo_name)
+            os.makedirs(model_dir, exist_ok=True)
 
-        # ---- Train ---- #
-        train_csv_path = os.path.join(exp_dir, f"{algo_name}.csv")
-        with open(train_csv_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=[
-                "episode", "ep_return", "ep_length", "global_step", "epsilon"])
-            writer.writeheader()
-            train_algorithm(agent, env, algo_name, algo_cfg, shared,
-                            t_steps, num_envs, writer, device)
+            # ---- Train ---- #
+            train_csv_path = os.path.join(exp_dir, f"{algo_name}.csv")
+            with open(train_csv_path, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=[
+                    "episode", "ep_return", "ep_length", "global_step", "epsilon"])
+                writer.writeheader()
+                train_algorithm(agent, env, algo_name, algo_cfg, shared,
+                                t_steps, num_envs, writer, device)
 
         # Save final model
         if algo_name == "Linear_Q":
@@ -695,15 +696,21 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg,
 
         print(f"  Deployment complete. Results saved to {deploy_csv_path}")
 
-        # Save training summary
-        summary_path = os.path.join(exp_dir, f"{algo_name}_summary.txt")
-        with open(summary_path, "w") as f:
-            f.write(f"Algorithm: {algo_name}\n")
-            f.write(f"Task: {args_cli.task}\n")
-            f.write(f"Num Envs: {num_envs}\n")
-            f.write(f"Episodes: {algo_cfg.get('n_episodes', 1000)}\n")
-            f.write(f"Config: {json.dumps(algo_cfg, indent=2)}\n")
-            f.write(f"Shared: {json.dumps(shared, indent=2)}\n")
+            # Save training summary
+            summary_path = os.path.join(exp_dir, f"{algo_name}_summary.txt")
+            with open(summary_path, "w") as f:
+                f.write(f"Algorithm: {algo_name}\n")
+                f.write(f"Task: {args_cli.task}\n")
+                f.write(f"Num Envs: {num_envs}\n")
+                f.write(f"Episodes: {algo_cfg.get('n_episodes', 1000)}\n")
+                f.write(f"Config: {json.dumps(algo_cfg, indent=2)}\n")
+                f.write(f"Shared: {json.dumps(shared, indent=2)}\n")
+
+        except Exception as e:
+            import traceback
+            print(f"\n  ERROR in {algo_name}:")
+            traceback.print_exc()
+            print(f"  Skipping {algo_name}, continuing with next algorithm...\n")
 
     # Close env only after ALL algorithms are done
     env.close()
