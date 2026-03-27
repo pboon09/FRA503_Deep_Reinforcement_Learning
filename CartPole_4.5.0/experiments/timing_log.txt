@@ -1,10 +1,50 @@
 ============================================================
-Run started at 2026-03-26 23:39:47
-Suites: {'PLOTS'}
+============================================================
+Run started at 2026-03-27 08:55:21
+Run started at 2026-03-27 08:55:21
+Suites: {'TRAIN', 'DEPLOY'}
+Algo envs: {'PPO': 256, 'AC': 8, 'MC_REINFORCE': 16, 'DQN': 32, 'Linear_Q': 32}
+Suites: {'TRAIN', 'DEPLOY'}
+============================================================
+
 Algo envs: {'PPO': 256, 'AC': 8, 'MC_REINFORCE': 16, 'DQN': 32, 'Linear_Q': 32}
 ============================================================
 
+[TRAIN] Linear_Q (num_envs=32) started at 2026-03-27 08:55:21
+[TRAIN] DQN (num_envs=32) started at 2026-03-27 08:55:21
+[TRAIN] Linear_Q finished at 2026-03-27 08:57:56 | elapsed 2.6 min | OK
+
+[DEPLOY] Linear_Q started at 2026-03-27 08:57:56
+[DEPLOY] Linear_Q finished at 2026-03-27 08:58:05 | elapsed 8.7 sec | OK
+
 ============================================================
-All done at 2026-03-26 23:39:54
+All done at 2026-03-27 08:58:05
+============================================================
+
+[TRAIN] DQN finished at 2026-03-27 10:16:45 | elapsed 81.4 min | OK
+
+[TRAIN] MC_REINFORCE (num_envs=16) started at 2026-03-27 10:16:45
+[TRAIN] MC_REINFORCE finished at 2026-03-27 10:21:37 | elapsed 4.9 min | FAILED
+
+[TRAIN] AC (num_envs=8) started at 2026-03-27 10:21:37
+[TRAIN] AC finished at 2026-03-27 12:25:25 | elapsed 123.8 min | OK
+
+[TRAIN] PPO (num_envs=256) started at 2026-03-27 12:25:25
+[TRAIN] PPO finished at 2026-03-27 12:32:27 | elapsed 7.0 min | OK
+
+[DEPLOY] DQN started at 2026-03-27 12:32:27
+[DEPLOY] DQN finished at 2026-03-27 12:32:53 | elapsed 25.9 sec | OK
+
+[DEPLOY] MC_REINFORCE started at 2026-03-27 12:32:53
+[DEPLOY] MC_REINFORCE finished at 2026-03-27 12:33:25 | elapsed 31.6 sec | OK
+
+[DEPLOY] AC started at 2026-03-27 12:33:25
+[DEPLOY] AC finished at 2026-03-27 12:33:56 | elapsed 31.5 sec | OK
+
+[DEPLOY] PPO started at 2026-03-27 12:33:56
+[DEPLOY] PPO finished at 2026-03-27 12:34:28 | elapsed 31.7 sec | OK
+
+============================================================
+All done at 2026-03-27 12:34:28
 ============================================================
 
