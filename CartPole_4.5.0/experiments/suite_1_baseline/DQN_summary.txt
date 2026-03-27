@@ -9,7 +9,7 @@ Config: {
   "learning_rate": 0.0001,
   "tau": 0.005,
   "initial_epsilon": 1.0,
-  "epsilon_decay": 4.8e-06,
+  "epsilon_decay": 6.5e-05,
   "final_epsilon": 0.04,
   "buffer_size": 1000000,
   "batch_size": 128,

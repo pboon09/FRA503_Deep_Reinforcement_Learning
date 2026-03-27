@@ -11,11 +11,11 @@ Config: {
   "activation": "elu",
   "action_type": "continuous",
   "init_noise_std": 1.0,
-  "learning_rate": 0.001,
+  "learning_rate": 0.0003,
   "value_loss_coef": 0.5,
-  "entropy_coef": 0.05,
-  "max_grad_norm": 1.0,
-  "num_transitions_per_env": 64,
+  "entropy_coef": 0.01,
+  "max_grad_norm": 0.5,
+  "num_transitions_per_env": 16,
   "total_steps": 20000
 }
 Shared: {

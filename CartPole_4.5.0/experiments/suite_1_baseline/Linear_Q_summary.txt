@@ -7,7 +7,7 @@ Config: {
   "learning_rate": 0.01,
   "lr_decay": 0.9995,
   "initial_epsilon": 1.0,
-  "epsilon_decay": 0.0002,
+  "epsilon_decay": 5e-05,
   "final_epsilon": 0.01,
   "total_steps": 20000
 }
