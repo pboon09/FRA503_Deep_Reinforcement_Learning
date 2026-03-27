@@ -193,6 +193,16 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 writer.writerows(agent.episode_log)
         print(f"Saved CSV ({len(agent.episode_log)} episodes) to {csv_path}")
 
+        # Save per-update metrics CSV
+        metrics_path = os.path.join(exp_dir, f"{Algorithm_name}_metrics.csv")
+        if hasattr(agent, 'metrics_log') and agent.metrics_log:
+            fieldnames = list(agent.metrics_log[0].keys())
+            with open(metrics_path, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(agent.metrics_log)
+            print(f"Saved metrics ({len(agent.metrics_log)} updates) to {metrics_path}")
+
         break
     # ==================================================================== #
     env.close()

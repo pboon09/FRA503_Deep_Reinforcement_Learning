@@ -203,6 +203,8 @@ class PPO(OnPolicyAlgorithm):
         mean_value_loss     = 0.0
         mean_surrogate_loss = 0.0
         mean_entropy        = 0.0
+        total_clip_fraction = 0.0
+        total_grad_norm     = 0.0
 
         generator = self.storage.mini_batch_generator(
             self.num_mini_batches, self.num_learning_epochs
@@ -275,18 +277,28 @@ class PPO(OnPolicyAlgorithm):
 
             self.optimizer.zero_grad()
             loss.backward()
-            nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+            grad_norm = nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
             self.optimizer.step()
 
             mean_value_loss     += value_loss.item()
             mean_surrogate_loss += surrogate_loss.item()
             mean_entropy        += entropy_batch.mean().item()
+            total_clip_fraction += (torch.abs(ratio - 1.0) > self.clip_param).float().mean().item()
+            total_grad_norm     += grad_norm.item()
             # ====================================== #
 
         num_updates          = self.num_learning_epochs * self.num_mini_batches
         mean_value_loss     /= num_updates
         mean_surrogate_loss /= num_updates
         mean_entropy        /= num_updates
+        total_clip_fraction /= num_updates
+        total_grad_norm     /= num_updates
+
+        # Explained variance
+        with torch.no_grad():
+            all_returns = self.storage.returns.flatten()
+            all_values = self.storage.values.flatten()
+            ev = 1.0 - (all_returns - all_values).var() / (all_returns.var() + 1e-8)
 
         self.storage.clear()   # on-policy: discard rollout after update
 
@@ -294,6 +306,9 @@ class PPO(OnPolicyAlgorithm):
             "value":     mean_value_loss,
             "surrogate": mean_surrogate_loss,
             "entropy":   mean_entropy,
+            "clip_fraction": total_clip_fraction,
+            "grad_norm": total_grad_norm,
+            "explained_variance": ev.item(),
         }
 
     # ------------------------------------------------------------------ #
@@ -373,6 +388,17 @@ class PPO(OnPolicyAlgorithm):
 
             self.policy.train()
             losses = self.update()
+            self.metrics_log.append({
+                "iteration": iteration,
+                "global_step": global_step,
+                "surrogate_loss": losses["surrogate"],
+                "value_loss": losses["value"],
+                "entropy": losses["entropy"],
+                "clip_fraction": losses["clip_fraction"],
+                "grad_norm": losses["grad_norm"],
+                "explained_variance": losses["explained_variance"],
+                "learning_rate": self.learning_rate,
+            })
             iteration += 1
 
             if total_episodes - last_log >= 100 and total_episodes > 0:

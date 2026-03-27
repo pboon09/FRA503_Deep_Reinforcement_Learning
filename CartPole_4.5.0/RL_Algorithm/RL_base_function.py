@@ -48,6 +48,7 @@ class BaseAlgorithm:
 
         # ===== Per-episode logging (appended by learn()) ===== #
         self.episode_log = []  # list of dicts: {episode, ep_return, ep_length, epsilon}
+        self.metrics_log = []  # list of dicts: per-update training metrics
 
         # ===== Matplotlib / plotting (shared by all subclasses) ===== #
         self.episode_durations = []

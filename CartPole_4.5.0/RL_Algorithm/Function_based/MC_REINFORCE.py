@@ -221,12 +221,24 @@ class MC_REINFORCE(BaseAlgorithm):
 
                 self.optimizer.zero_grad()
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(
+                grad_norm = torch.nn.utils.clip_grad_norm_(
                     list(self.policy_net.parameters()) + list(self.value_net.parameters()),
                     max_norm=0.5,
                 )
                 self.optimizer.step()
 
+            # Log training metrics
+            with torch.no_grad():
+                ev = 1.0 - (masked_returns - masked_values.detach()).var() / (masked_returns.var() + 1e-8)
+            self.metrics_log.append({
+                "iteration": iteration,
+                "global_step": global_step,
+                "policy_loss": policy_loss.item(),
+                "value_loss": value_loss.item(),
+                "entropy": entropy.item(),
+                "grad_norm": grad_norm.item(),
+                "explained_variance": ev.item(),
+            })
             iteration += 1
 
             if total_episodes - last_log >= 100 and total_episodes > 0:

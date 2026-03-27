@@ -115,12 +115,16 @@ class DQN(OffPolicyAlgorithm):
     def update_policy(self):
         sample = self.generate_sample()
         if sample is None:
-            return
+            return None
         loss = self.calculate_loss(*sample)
         self.optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=1.0)
+        grad_norm = torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=1.0)
         self.optimizer.step()
+        # Mean Q-value for diagnostics
+        with torch.no_grad():
+            q_mean = self.policy_net(sample[2]).max(dim=1).values.mean().item()
+        return {"td_loss": loss.item(), "grad_norm": grad_norm.item(), "q_mean": q_mean}
 
     def update_target_networks(self):
         for tp, pp in zip(self.target_net.parameters(), self.policy_net.parameters()):
@@ -188,9 +192,18 @@ class DQN(OffPolicyAlgorithm):
                 self.decay_epsilon()
 
             if global_step >= self.learning_starts:
-                self.update_policy()
+                update_info = self.update_policy()
                 self.update_target_networks()
                 self.scheduler.step()
+                if update_info is not None and total_episodes % 10 == 0:
+                    self.metrics_log.append({
+                        "iteration": len(self.metrics_log),
+                        "global_step": global_step,
+                        "td_loss": update_info["td_loss"],
+                        "grad_norm": update_info["grad_norm"],
+                        "q_mean": update_info["q_mean"],
+                        "epsilon": float(self.epsilon),
+                    })
             state = next_state
 
             if total_episodes - last_log >= 100 and total_episodes > 0:

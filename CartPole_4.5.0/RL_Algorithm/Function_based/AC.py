@@ -200,8 +200,21 @@ class AC(OnPolicyAlgorithm):
 
                 self.optimizer.zero_grad()
                 total_loss.backward()
-                nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+                grad_norm = nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
                 self.optimizer.step()
+
+            # Log training metrics
+            with torch.no_grad():
+                ev = 1.0 - (returns - values).var() / (returns.var() + 1e-8)
+            self.metrics_log.append({
+                "iteration": len(self.metrics_log),
+                "global_step": global_step,
+                "actor_loss": actor_loss.item(),
+                "critic_loss": critic_loss.item(),
+                "entropy": entropy.item(),
+                "grad_norm": grad_norm.item(),
+                "explained_variance": ev.item(),
+            })
 
             if total_episodes - last_log >= 100 and total_episodes > 0:
                 n_new = total_episodes - last_log
