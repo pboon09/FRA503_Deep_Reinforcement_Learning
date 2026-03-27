@@ -11,7 +11,7 @@ Config: {
   "activation": "elu",
   "action_type": "continuous",
   "init_noise_std": 1.0,
-  "learning_rate": 0.0003,
+  "learning_rate": 0.0005,
   "value_loss_coef": 0.5,
   "entropy_coef": 0.01,
   "max_grad_norm": 0.5,
