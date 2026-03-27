@@ -386,7 +386,7 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
             env_actions = [[] for _ in range(num_envs)]
             env_rewards = [[] for _ in range(num_envs)]
             num_updates = 0
-            update_every = 5  # frequent updates for short episodes
+            update_every = 2  # very frequent updates for short episodes
             agent.optimizer.zero_grad()
 
         pbar = tqdm(total=total_steps, desc=f"Training {algo_name}", ncols=100)

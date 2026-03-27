@@ -12,7 +12,7 @@
             "learning_rate": 0.01,
             "lr_decay": 0.9995,
             "initial_epsilon": 1.0,
-            "epsilon_decay": 2e-4,
+            "epsilon_decay": 5e-5,
             "final_epsilon": 0.01,
             "total_steps": 20000
         },
@@ -23,7 +23,7 @@
             "learning_rate": 0.0001,
             "tau": 0.005,
             "initial_epsilon": 1.0,
-            "epsilon_decay": 4.8e-6,
+            "epsilon_decay": 6.5e-5,
             "final_epsilon": 0.04,
             "buffer_size": 1000000,
             "batch_size": 128,
@@ -34,7 +34,7 @@
             "hidden_dim": 64,
             "dropout": 0.0,
             "action_type": "continuous",
-            "learning_rate": 0.0005,
+            "learning_rate": 0.001,
             "total_steps": 20000
         },
         "AC": {
@@ -55,11 +55,11 @@
             "activation": "elu",
             "action_type": "continuous",
             "init_noise_std": 1.0,
-            "learning_rate": 0.001,
+            "learning_rate": 0.0003,
             "value_loss_coef": 0.5,
-            "entropy_coef": 0.05,
-            "max_grad_norm": 1.0,
-            "num_transitions_per_env": 64,
+            "entropy_coef": 0.01,
+            "max_grad_norm": 0.5,
+            "num_transitions_per_env": 16,
             "total_steps": 20000
         },
         "PPO": {
