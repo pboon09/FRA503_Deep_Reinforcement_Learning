@@ -425,7 +425,9 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                     ns = None if done_cpu[i] else next_obs[i]
                     agent.store_transition(obs[i], int(indices[i].item()), float(rew_cpu[i]),
                                            ns, bool(term_cpu[i]))
-                agent.update_policy()
+                # Multiple gradient steps per env step (replay ratio scaling)
+                for _ in range(8):
+                    agent.update_policy()
                 agent.update_target_networks()
                 agent.decay_epsilon()
 
@@ -498,7 +500,9 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                 for i in range(num_envs):
                     agent.store_transition(obs[i], raw[i], float(rew_cpu[i]),
                                            next_obs[i], float(done_cpu[i]))
-                agent.update_policy()
+                # Multiple gradient steps per env step (replay ratio scaling)
+                for _ in range(8):
+                    agent.update_policy()
 
             # --- Track completed episodes ---
             ep_returns += reward
@@ -708,6 +712,17 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg,
     print("  All experiments complete!")
     print(f"  Results: {exp_dir}")
     print(f"{'='*60}")
+
+    # Auto-generate visualization figures
+    print("\n  Generating figures...")
+    try:
+        import subprocess
+        vis_script = os.path.join(ROOT, "scripts", "Function_based", "visualize", "plot_report_figures.py")
+        subprocess.run([sys.executable, vis_script], cwd=ROOT, check=True)
+        print("  Figures saved to figures/")
+    except Exception as e:
+        print(f"  Warning: Failed to generate figures: {e}")
+        print(f"  Run manually: python {vis_script}")
 
 
 if __name__ == "__main__":

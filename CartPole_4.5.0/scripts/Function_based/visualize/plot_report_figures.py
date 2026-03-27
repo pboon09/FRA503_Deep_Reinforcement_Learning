@@ -88,24 +88,29 @@ def adaptive_window(n):
 # --------------------------------------------------------------------------- #
 def make_fig1(out):
     fig, ax = plt.subplots(figsize=(14, 5))
+    # Find the minimum episode count to set a common x-axis
+    min_eps = min(
+        len(load_csv(a)) for a in ALGOS
+        if load_csv(a) is not None and "ep_return" in load_csv(a).columns
+    )
+    max_x = min(min_eps, 20000)  # cap at 20K episodes for readability
     for algo in ALGOS:
         df = load_csv(algo)
-        if df is None or "ep_return" not in df.columns or "global_step" not in df.columns:
+        if df is None or "ep_return" not in df.columns:
             continue
-        # Use global_step as x-axis so all algorithms share the same scale
-        x = df["global_step"].values
+        df = df.head(max_x)  # truncate to common range
         y = df["ep_return"]
         w = adaptive_window(len(y))
         smoothed = y.rolling(w, min_periods=1).mean()
         std = y.rolling(w, min_periods=1).std().fillna(0)
-        ax.plot(x, smoothed.values, label=ALGO_DISPLAY[algo], color=ALGO_COLORS[algo])
-        ax.fill_between(x,
+        ax.plot(smoothed.values, label=ALGO_DISPLAY[algo], color=ALGO_COLORS[algo])
+        ax.fill_between(range(len(smoothed)),
                         (smoothed - std).values, (smoothed + std).values,
                         alpha=0.15, color=ALGO_COLORS[algo])
     ax.axhline(y=950, color="gray", linestyle="--", alpha=0.3)
-    ax.set_xlabel("Total Environment Steps")
+    ax.set_xlabel("Episode")
     ax.set_ylabel("Episode Return (rolling mean +/- std)")
-    ax.set_title("Learning Efficiency: Return vs Environment Steps", fontweight="bold")
+    ax.set_title("Learning Efficiency: Return vs Training Episode", fontweight="bold")
     ax.set_ylim(bottom=0)
     ax.legend(loc="upper left")
     fig.tight_layout()
