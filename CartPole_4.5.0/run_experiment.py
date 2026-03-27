@@ -679,22 +679,22 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg,
                 train_algorithm(agent, env, algo_name, algo_cfg, shared,
                                 t_steps, num_envs, writer, device)
 
-        # Save final model
-        if algo_name == "Linear_Q":
-            agent.save_model(model_dir, f"{algo_name}_final.npy")
-        else:
-            agent.save_model(model_dir, f"{algo_name}_final.pth")
+            # Save final model
+            if algo_name == "Linear_Q":
+                agent.save_model(model_dir, f"{algo_name}_final.npy")
+            else:
+                agent.save_model(model_dir, f"{algo_name}_final.pth")
 
-        print(f"  Training complete. Model saved to {model_dir}")
+            print(f"  Training complete. Model saved to {model_dir}")
 
-        # ---- Deploy (reuse same env, don't close) ---- #
-        deploy_csv_path = os.path.join(exp_dir, f"{algo_name}_deploy.csv")
-        with open(deploy_csv_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["episode", "ep_return", "ep_length"])
-            writer.writeheader()
-            deploy(agent, env, algo_name, args_cli.deploy_episodes, 1000, writer, device)
+            # ---- Deploy (reuse same env, don't close) ---- #
+            deploy_csv_path = os.path.join(exp_dir, f"{algo_name}_deploy.csv")
+            with open(deploy_csv_path, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=["episode", "ep_return", "ep_length"])
+                writer.writeheader()
+                deploy(agent, env, algo_name, args_cli.deploy_episodes, 1000, writer, device)
 
-        print(f"  Deployment complete. Results saved to {deploy_csv_path}")
+            print(f"  Deployment complete. Results saved to {deploy_csv_path}")
 
             # Save training summary
             summary_path = os.path.join(exp_dir, f"{algo_name}_summary.txt")
