@@ -330,22 +330,34 @@ class SAC(OffPolicyAlgorithm):
             return None
 
         states, actions, rewards, next_states, dones = sample
-        critic_loss, actor_loss, alpha_loss = self.calculate_loss(
-            states, actions, rewards, next_states, dones
-        )
+
         # ========= put your code here ========= #
-        # Update critic
+        # --- Critic update ---
+        with torch.no_grad():
+            next_action, next_log_prob = self.actor.sample(next_states)
+            tq1, tq2 = self.critic_target(next_states, next_action)
+            min_tq = torch.min(tq1, tq2) - self.alpha * next_log_prob.unsqueeze(-1)
+            target_q = rewards + self.discount_factor * (1 - dones) * min_tq
+        q1, q2 = self.critic(states, actions)
+        critic_loss = F.mse_loss(q1, target_q) + F.mse_loss(q2, target_q)
+
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
         self.critic_optimizer.step()
 
-        # Update actor
+        # --- Actor update (fresh forward pass after critic update) ---
+        new_action, new_log_prob = self.actor.sample(states)
+        q1_new, q2_new = self.critic(states, new_action)
+        min_q_new = torch.min(q1_new, q2_new)
+        actor_loss = (self.alpha * new_log_prob.unsqueeze(-1) - min_q_new).mean()
+
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
 
-        # Update alpha (temperature)
-        if alpha_loss is not None:
+        # --- Alpha update ---
+        if self.auto_alpha:
+            alpha_loss = -(self.log_alpha * (new_log_prob.detach() + self.target_entropy)).mean()
             self.alpha_optimizer.zero_grad()
             alpha_loss.backward()
             self.alpha_optimizer.step()

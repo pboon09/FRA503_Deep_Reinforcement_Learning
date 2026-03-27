@@ -298,22 +298,29 @@ class TD3(OffPolicyAlgorithm):
             return None
 
         states, actions, rewards, next_states, dones = sample
-        critic_loss, actor_loss = self.calculate_loss(
-            states, actions, rewards, next_states, dones
-        )
+
         # ========= put your code here ========= #
-        # Update critic
+        # --- Critic update ---
+        with torch.no_grad():
+            next_action = self.actor_target(next_states)
+            noise = (torch.randn_like(next_action) * self.target_noise).clamp(
+                -self.target_noise_clip, self.target_noise_clip)
+            next_action = (next_action + noise).clamp(-1.0, 1.0)
+            tq1, tq2 = self.critic_target(next_states, next_action)
+            target_q = rewards + self.discount_factor * (1 - dones) * torch.min(tq1, tq2)
+        cq1, cq2 = self.critic(states, actions)
+        critic_loss = F.mse_loss(cq1, target_q) + F.mse_loss(cq2, target_q)
+
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
         self.critic_optimizer.step()
 
-        # Delayed actor update
-        if actor_loss is not None:
+        # --- Delayed actor update (fresh forward pass after critic update) ---
+        if self.total_steps % self.policy_update_freq == 0:
+            actor_loss = -self.critic.Q1(states, self.actor(states)).mean()
             self.actor_optimizer.zero_grad()
             actor_loss.backward()
             self.actor_optimizer.step()
-
-            # Update target networks only when actor is updated
             self.update_target_networks()
         # ====================================== #
 

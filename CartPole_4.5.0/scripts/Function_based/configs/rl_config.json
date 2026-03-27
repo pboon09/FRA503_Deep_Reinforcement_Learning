@@ -31,11 +31,11 @@
         },
         "MC_REINFORCE": {
             "num_of_action": 1,
-            "hidden_dim": 256,
-            "dropout": 0.1,
+            "hidden_dim": 64,
+            "dropout": 0.0,
             "action_type": "continuous",
-            "learning_rate": 0.001,
-            "total_steps": 20000
+            "learning_rate": 0.0005,
+            "total_steps": 40000
         },
         "AC": {
             "num_of_action": 1,
@@ -55,12 +55,12 @@
             "activation": "elu",
             "action_type": "continuous",
             "init_noise_std": 1.0,
-            "learning_rate": 0.0003,
+            "learning_rate": 0.001,
             "value_loss_coef": 0.5,
-            "entropy_coef": 0.01,
+            "entropy_coef": 0.05,
             "max_grad_norm": 1.0,
-            "num_transitions_per_env": 32,
-            "total_steps": 20000
+            "num_transitions_per_env": 64,
+            "total_steps": 40000
         },
         "PPO": {
             "num_of_action": 1,
