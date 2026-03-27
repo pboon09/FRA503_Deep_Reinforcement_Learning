@@ -1,0 +1,23 @@
+Algorithm: Linear_Q
+Task: Stabilize-Isaac-Cartpole-v0
+Num Envs: 256
+Episodes: 1000
+Config: {
+  "num_of_action": 11,
+  "learning_rate": 0.01,
+  "lr_decay": 0.9995,
+  "initial_epsilon": 1.0,
+  "epsilon_decay": 0.0002,
+  "final_epsilon": 0.01,
+  "total_steps": 20000
+}
+Shared: {
+  "n_observations": 4,
+  "action_range": [
+    -2.5,
+    2.5
+  ],
+  "discount_factor": 0.99,
+  "num_envs": 256,
+  "total_steps": 20000
+}

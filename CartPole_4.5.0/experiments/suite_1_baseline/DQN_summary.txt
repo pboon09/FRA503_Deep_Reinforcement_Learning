@@ -1,0 +1,27 @@
+Algorithm: DQN
+Task: Stabilize-Isaac-Cartpole-v0
+Num Envs: 256
+Episodes: 1000
+Config: {
+  "num_of_action": 11,
+  "hidden_dim": 128,
+  "dropout": 0.0,
+  "learning_rate": 0.0001,
+  "tau": 0.005,
+  "initial_epsilon": 1.0,
+  "epsilon_decay": 4.8e-06,
+  "final_epsilon": 0.04,
+  "buffer_size": 1000000,
+  "batch_size": 128,
+  "total_steps": 20000
+}
+Shared: {
+  "n_observations": 4,
+  "action_range": [
+    -2.5,
+    2.5
+  ],
+  "discount_factor": 0.99,
+  "num_envs": 256,
+  "total_steps": 20000
+}
