@@ -13,6 +13,7 @@ Config: {
   "init_alpha": 0.2,
   "auto_alpha": true,
   "target_entropy": null,
+  "learning_starts": 1000,
   "total_steps": 20000
 }
 Shared: {

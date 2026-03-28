@@ -15,7 +15,7 @@ Config: {
   "value_loss_coef": 0.5,
   "entropy_coef": 0.01,
   "max_grad_norm": 0.5,
-  "num_transitions_per_env": 16,
+  "num_transitions_per_env": 4,
   "total_steps": 20000
 }
 Shared: {
