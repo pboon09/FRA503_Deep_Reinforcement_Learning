@@ -435,11 +435,10 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                     ns = None if done_cpu[i] else next_obs[i]
                     agent.store_transition(obs[i], int(indices[i].item()), float(rew_cpu[i]),
                                            ns, bool(term_cpu[i]))
-                # Multiple gradient steps per batch step (UTD=4)
+                # Single gradient step after learning_starts warmup
                 if step >= agent.learning_starts:
-                    for _ in range(4):
-                        agent.update_policy()
-                        agent.update_target_networks()
+                    agent.update_policy()
+                    agent.update_target_networks()
                 agent.decay_epsilon()
 
             elif algo_name == "MC_REINFORCE":

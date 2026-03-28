@@ -23,11 +23,11 @@
             "learning_rate": 1e-4,
             "tau": 0.005,
             "initial_epsilon": 1.0,
-            "epsilon_decay": 1e-4,
+            "epsilon_decay": 5e-5,
             "final_epsilon": 0.05,
             "buffer_size": 1000000,
             "batch_size": 128,
-            "learning_starts": 1000,
+            "learning_starts": 5000,
             "total_steps": 20000
         },
         "MC_REINFORCE": {
