@@ -271,17 +271,23 @@ def make_fig4(out, threshold=200):
 # --------------------------------------------------------------------------- #
 def make_fig5(out):
     fig, ax = plt.subplots(figsize=(14, 5))
+    cfg = _load_cfg()
+    num_envs = cfg.get("shared", {}).get("num_envs", 256)
+    total_steps = cfg.get("shared", {}).get("total_steps", 20000)
     for algo in ALGOS:
         df = load_csv(algo)
         if df is None or "ep_return" not in df.columns or "ep_length" not in df.columns:
             continue
+        batch_step = df["global_step"] / num_envs
         rps = df["ep_return"] / df["ep_length"].clip(lower=1)
         w = adaptive_window(len(rps))
         smoothed = rps.rolling(w, min_periods=1).mean()
-        ax.plot(smoothed.values, label=ALGO_DISPLAY[algo], color=ALGO_COLORS[algo])
-    ax.set_xlabel("Episode")
+        ax.plot(batch_step.values, smoothed.values, label=ALGO_DISPLAY[algo],
+                color=ALGO_COLORS[algo])
+    ax.set_xlabel("Batch Step")
     ax.set_ylabel("Return per Step (rolling mean)")
     ax.set_title("Reward Efficiency: Average Reward per Timestep", fontweight="bold")
+    ax.set_xlim(0, total_steps)
     ax.set_ylim(bottom=0)
     ax.legend()
     fig.tight_layout()
@@ -295,19 +301,25 @@ def make_fig5(out):
 # --------------------------------------------------------------------------- #
 def make_fig6(out):
     fig, ax = plt.subplots(figsize=(14, 5))
+    cfg = _load_cfg()
+    num_envs = cfg.get("shared", {}).get("num_envs", 256)
+    total_steps = cfg.get("shared", {}).get("total_steps", 20000)
     plotted = False
     for algo in ["Linear_Q", "DQN"]:
         df = load_csv(algo)
         if df is None or "epsilon" not in df.columns:
             continue
-        ax.plot(df["epsilon"].values, label=ALGO_DISPLAY[algo], color=ALGO_COLORS[algo])
+        batch_step = df["global_step"] / num_envs
+        ax.plot(batch_step.values, df["epsilon"].values,
+                label=ALGO_DISPLAY[algo], color=ALGO_COLORS[algo])
         plotted = True
     if not plotted:
         plt.close(fig)
         return
-    ax.set_xlabel("Episode")
+    ax.set_xlabel("Batch Step")
     ax.set_ylabel("Epsilon")
     ax.set_title("Exploration Rate Decay (Value-Based Algorithms)", fontweight="bold")
+    ax.set_xlim(0, total_steps)
     ax.set_ylim(bottom=0, top=1.05)
     ax.legend()
     fig.tight_layout()
@@ -321,18 +333,24 @@ def make_fig6(out):
 # --------------------------------------------------------------------------- #
 def make_fig7(out):
     fig, ax = plt.subplots(figsize=(14, 5))
+    cfg = _load_cfg()
+    num_envs = cfg.get("shared", {}).get("num_envs", 256)
+    total_steps = cfg.get("shared", {}).get("total_steps", 20000)
     for algo in ALGOS:
         df = load_csv(algo)
-        if df is None or "ep_length" not in df.columns:
+        if df is None or "ep_length" not in df.columns or "global_step" not in df.columns:
             continue
+        batch_step = df["global_step"] / num_envs
         y = df["ep_length"]
         w = adaptive_window(len(y))
         smoothed = y.rolling(w, min_periods=1).mean()
-        ax.plot(smoothed.values, label=ALGO_DISPLAY[algo], color=ALGO_COLORS[algo])
+        ax.plot(batch_step.values, smoothed.values,
+                label=ALGO_DISPLAY[algo], color=ALGO_COLORS[algo])
     ax.axhline(y=1000, color="gray", linestyle="--", alpha=0.3)
-    ax.set_xlabel("Episode")
+    ax.set_xlabel("Batch Step")
     ax.set_ylabel("Episode Length (steps, rolling mean)")
-    ax.set_title("Survival Time: Episode Length vs Training Episode", fontweight="bold")
+    ax.set_title("Survival Time: Episode Length vs Batch Step", fontweight="bold")
+    ax.set_xlim(0, total_steps)
     ax.set_ylim(bottom=0)
     ax.legend(loc="upper left")
     fig.tight_layout()

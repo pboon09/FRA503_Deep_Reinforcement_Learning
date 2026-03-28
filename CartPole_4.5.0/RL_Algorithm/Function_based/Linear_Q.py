@@ -44,8 +44,8 @@ class Linear_QN(BaseAlgorithm):
         # Shape: (obs_feature_dim, num_of_action)
         self.w = np.zeros((4, num_of_action))
 
-        # Observation scale for normalization: [cart_pos, cart_vel, pole_angle, pole_vel]
-        # CartPole obs ranges: pos~±3, vel~±10, angle~±0.42rad, ang_vel~±5
+        # Observation scale for normalization: [cart_pos, pole_angle, cart_vel, pole_ang_vel]
+        # CartPole obs ranges: pos~±3, angle~±0.42rad, vel~±5, ang_vel~±5
         self.obs_scale = np.array([3.0, 0.419, 5.0, 5.0], dtype=np.float32)
 
         # GPU version of weights (created lazily in learn())
