@@ -19,8 +19,8 @@ class ActorCritic(nn.Module):
     """
     Combined Actor-Critic network supporting continuous and discrete actions.
 
-    ``action_type='continuous'`` → ``Normal(mean, std)``, learnable ``self.std``
-    ``action_type='discrete'``   → ``Categorical(logits)``, no ``self.std``
+    ``action_type='continuous'`` → ``Normal(mean, exp(log_std))``, learnable ``self.log_std``
+    ``action_type='discrete'``   → ``Categorical(logits)``, no ``self.log_std``
 
     Args:
         state_dim (int): Observation space dimension.
@@ -52,7 +52,8 @@ class ActorCritic(nn.Module):
         self.critic = MLP(state_dim, 1,          hidden_dims, activation)
 
         if self.action_type == "continuous":
-            self.std = nn.Parameter(init_noise_std * torch.ones(action_dim))
+            import math
+            self.log_std = nn.Parameter(torch.full((action_dim,), math.log(init_noise_std)))
 
         self.distribution: Normal | Categorical | None = None
 
@@ -69,7 +70,7 @@ class ActorCritic(nn.Module):
     @property
     def action_std(self) -> torch.Tensor:
         if self.action_type == "continuous":
-            return self.distribution.stddev
+            return self.log_std.exp()
         return torch.ones_like(self.distribution.probs)
 
     @property
@@ -94,7 +95,7 @@ class ActorCritic(nn.Module):
         # ========= put your code here ========= #
         mean = self.actor(obs)
         if self.action_type == "continuous":
-            self.distribution = Normal(mean, self.std)
+            self.distribution = Normal(mean, self.log_std.exp())
         else:
             self.distribution = Categorical(logits=mean)
         # ====================================== #
