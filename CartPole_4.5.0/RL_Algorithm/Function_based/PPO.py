@@ -397,5 +397,5 @@ class PPO(OnPolicyAlgorithm):
             filename (str): File name (e.g., 'ppo_cartpole.pth').
         """
         # ========= put your code here ========= #
-        self.policy.load_state_dict(torch.load(f"{path}/{filename}"))
+        self.policy.load_state_dict(torch.load(f"{path}/{filename}", weights_only=True))
         # ====================================== #

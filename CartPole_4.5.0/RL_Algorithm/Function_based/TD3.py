@@ -435,7 +435,7 @@ class TD3(OffPolicyAlgorithm):
             filename (str): File name (e.g., 'td3_cartpole.pth').
         """
         # ========= put your code here ========= #
-        checkpoint = torch.load(os.path.join(path, filename), map_location=self.device)
+        checkpoint = torch.load(os.path.join(path, filename), map_location=self.device, weights_only=True)
         self.actor.load_state_dict(checkpoint['actor'])
         self.critic.load_state_dict(checkpoint['critic'])
         self.actor_target.load_state_dict(self.actor.state_dict())

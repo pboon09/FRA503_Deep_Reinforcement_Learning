@@ -50,7 +50,8 @@ class ActorCritic_A2C(nn.Module):
 
         # ===== Learnable log_std for continuous actions ===== #
         if self.action_type == "continuous":
-            self.std = nn.Parameter(init_noise_std * torch.ones(action_dim))
+            import math
+            self.log_std = nn.Parameter(torch.full((action_dim,), math.log(init_noise_std)))
 
         self.distribution = None
 
@@ -66,7 +67,9 @@ class ActorCritic_A2C(nn.Module):
 
     @property
     def action_std(self):
-        return self.distribution.stddev
+        if self.action_type == "continuous":
+            return self.log_std.exp()
+        return torch.ones_like(self.distribution.probs)
 
     @property
     def entropy(self):
@@ -84,7 +87,7 @@ class ActorCritic_A2C(nn.Module):
         # ========= put your code here ========= #
         mean = self.actor(obs)
         if self.action_type == "continuous":
-            self.distribution = Normal(mean, self.std)
+            self.distribution = Normal(mean, self.log_std.exp())
         else:
             self.distribution = Categorical(logits=mean)
         # ====================================== #
@@ -510,5 +513,5 @@ class A2C(OnPolicyAlgorithm):
             filename (str): File name (e.g., 'a2c_cartpole.pth').
         """
         # ========= put your code here ========= #
-        self.policy.load_state_dict(torch.load(f"{path}/{filename}"))
+        self.policy.load_state_dict(torch.load(f"{path}/{filename}", weights_only=True))
         # ====================================== #

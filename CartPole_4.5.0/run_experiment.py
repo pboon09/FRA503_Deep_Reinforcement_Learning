@@ -435,10 +435,11 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                     ns = None if done_cpu[i] else next_obs[i]
                     agent.store_transition(obs[i], int(indices[i].item()), float(rew_cpu[i]),
                                            ns, bool(term_cpu[i]))
-                # Single gradient step (UTD=1) after learning_starts warmup
+                # Multiple gradient steps per batch step (UTD=4)
                 if step >= agent.learning_starts:
-                    agent.update_policy()
-                    agent.update_target_networks()
+                    for _ in range(4):
+                        agent.update_policy()
+                        agent.update_target_networks()
                 agent.decay_epsilon()
 
             elif algo_name == "MC_REINFORCE":
@@ -513,9 +514,10 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                 for i in range(num_envs):
                     agent.store_transition(obs[i], raw[i], float(rew_cpu[i]),
                                            next_obs[i], float(done_cpu[i]))
-                # SAC: UTD=1 after learning_starts warmup
+                # SAC: multiple gradient steps per batch step (UTD=4)
                 if step >= getattr(agent, 'learning_starts', 0):
-                    agent.update_policy()
+                    for _ in range(4):
+                        agent.update_policy()
 
             elif algo_name == "TD3":
                 a_min, a_max = agent.action_range
@@ -525,9 +527,10 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                 for i in range(num_envs):
                     agent.store_transition(obs[i], raw[i], float(rew_cpu[i]),
                                            next_obs[i], float(done_cpu[i]))
-                # TD3: UTD=1 after learning_starts (deterministic actor is fragile at high UTD)
+                # TD3: multiple gradient steps per batch step (UTD=4)
                 if step >= agent.learning_starts:
-                    agent.update_policy()
+                    for _ in range(4):
+                        agent.update_policy()
 
             # --- Track completed episodes ---
             ep_returns += reward
@@ -695,12 +698,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg,
         print(f"\n{'='*60}")
         print(f"  Algorithm: {algo_name} ({num_envs} envs, {t_steps} batch steps)")
         print(f"{'='*60}")
-
-        # Reset seed before each algorithm for reproducibility
-        torch.manual_seed(args_cli.seed)
-        torch.cuda.manual_seed_all(args_cli.seed)
-        np.random.seed(args_cli.seed)
-        random.seed(args_cli.seed)
 
         try:
             # Build agent

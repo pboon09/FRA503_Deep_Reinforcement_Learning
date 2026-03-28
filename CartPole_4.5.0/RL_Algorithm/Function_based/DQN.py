@@ -378,7 +378,7 @@ class DQN(OffPolicyAlgorithm):
             filename (str): File name (e.g., 'dqn_cartpole.pth').
         """
         # ========= put your code here ========= #
-        state_dict = torch.load(os.path.join(path, filename), map_location=self.device)
+        state_dict = torch.load(os.path.join(path, filename), map_location=self.device, weights_only=True)
         self.policy_net.load_state_dict(state_dict)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         # ====================================== #
