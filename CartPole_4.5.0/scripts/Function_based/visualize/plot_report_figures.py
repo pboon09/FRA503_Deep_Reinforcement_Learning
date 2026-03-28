@@ -91,6 +91,38 @@ def adaptive_window(n):
     return max(1, n // 15)
 
 
+def _resample_to_grid(batch_step, values, total_steps, n_bins=500):
+    """Resample irregularly-spaced episode data onto a uniform grid.
+
+    Returns (grid_x, mean_y, std_y) arrays of length n_bins.
+    """
+    grid = np.linspace(0, total_steps, n_bins + 1)
+    mean_y = np.full(n_bins, np.nan)
+    std_y = np.full(n_bins, 0.0)
+    bs = np.asarray(batch_step)
+    vals = np.asarray(values)
+    for i in range(n_bins):
+        mask = (bs >= grid[i]) & (bs < grid[i + 1])
+        if mask.sum() > 0:
+            mean_y[i] = vals[mask].mean()
+            std_y[i] = vals[mask].std() if mask.sum() > 1 else 0.0
+    grid_x = (grid[:-1] + grid[1:]) / 2
+    # Forward-fill NaN bins
+    valid = ~np.isnan(mean_y)
+    if valid.sum() > 0:
+        last_val = mean_y[valid][0]
+        for i in range(n_bins):
+            if np.isnan(mean_y[i]):
+                mean_y[i] = last_val
+            else:
+                last_val = mean_y[i]
+    # Smooth with small window
+    w = max(1, n_bins // 20)
+    mean_s = pd.Series(mean_y).rolling(w, min_periods=1).mean().values
+    std_s = pd.Series(std_y).rolling(w, min_periods=1).mean().values
+    return grid_x, mean_s, std_s
+
+
 # --------------------------------------------------------------------------- #
 # Fig 1: Learning Curves -- Return vs Batch Step
 # --------------------------------------------------------------------------- #
@@ -103,20 +135,13 @@ def make_fig1(out):
         df = load_csv(algo)
         if df is None or "ep_return" not in df.columns or "global_step" not in df.columns:
             continue
-        # Convert global_step to batch step (0 .. total_steps)
         batch_step = df["global_step"] / num_envs
-        y = df["ep_return"]
-        w = adaptive_window(len(y))
-        smoothed = y.rolling(w, min_periods=1).mean()
-        std = y.rolling(w, min_periods=1).std().fillna(0)
-        ax.plot(batch_step.values, smoothed.values,
-                label=ALGO_DISPLAY[algo], color=ALGO_COLORS[algo])
-        ax.fill_between(batch_step.values,
-                        (smoothed - std).values, (smoothed + std).values,
-                        alpha=0.15, color=ALGO_COLORS[algo])
+        gx, gy, gs = _resample_to_grid(batch_step, df["ep_return"], total_steps)
+        ax.plot(gx, gy, label=ALGO_DISPLAY[algo], color=ALGO_COLORS[algo])
+        ax.fill_between(gx, gy - gs, gy + gs, alpha=0.15, color=ALGO_COLORS[algo])
     ax.axhline(y=950, color="gray", linestyle="--", alpha=0.3)
     ax.set_xlabel("Batch Step")
-    ax.set_ylabel("Episode Return (rolling mean +/- std)")
+    ax.set_ylabel("Episode Return (mean +/- std)")
     ax.set_title("Learning Efficiency: Return vs Batch Step", fontweight="bold")
     ax.set_xlim(0, total_steps)
     ax.set_ylim(bottom=0)
@@ -132,18 +157,19 @@ def make_fig1(out):
 # --------------------------------------------------------------------------- #
 def make_fig2(out):
     fig, ax = plt.subplots(figsize=(14, 5))
+    cfg = _load_cfg()
+    num_envs = cfg.get("shared", {}).get("num_envs", 256)
+    total_steps = cfg.get("shared", {}).get("total_steps", 20000)
+    max_env_steps = total_steps * num_envs
     for algo in ALGOS:
         df = load_csv(algo)
         if df is None or "global_step" not in df.columns:
             continue
-        y = df["ep_return"]
-        w = adaptive_window(len(y))
-        smoothed = y.rolling(w, min_periods=1).mean()
-        ax.plot(df["global_step"].values, smoothed.values,
-                label=ALGO_DISPLAY[algo], color=ALGO_COLORS[algo])
+        gx, gy, _ = _resample_to_grid(df["global_step"], df["ep_return"], max_env_steps)
+        ax.plot(gx, gy, label=ALGO_DISPLAY[algo], color=ALGO_COLORS[algo])
     ax.axhline(y=950, color="gray", linestyle="--", alpha=0.3)
     ax.set_xlabel("Total Environment Steps")
-    ax.set_ylabel("Episode Return (rolling mean)")
+    ax.set_ylabel("Episode Return (mean)")
     ax.set_title("Sample Efficiency: Return vs Environment Steps", fontweight="bold")
     ax.set_ylim(bottom=0)
     ax.legend(loc="upper left")
@@ -280,12 +306,10 @@ def make_fig5(out):
             continue
         batch_step = df["global_step"] / num_envs
         rps = df["ep_return"] / df["ep_length"].clip(lower=1)
-        w = adaptive_window(len(rps))
-        smoothed = rps.rolling(w, min_periods=1).mean()
-        ax.plot(batch_step.values, smoothed.values, label=ALGO_DISPLAY[algo],
-                color=ALGO_COLORS[algo])
+        gx, gy, _ = _resample_to_grid(batch_step, rps, total_steps)
+        ax.plot(gx, gy, label=ALGO_DISPLAY[algo], color=ALGO_COLORS[algo])
     ax.set_xlabel("Batch Step")
-    ax.set_ylabel("Return per Step (rolling mean)")
+    ax.set_ylabel("Return per Step (mean)")
     ax.set_title("Reward Efficiency: Average Reward per Timestep", fontweight="bold")
     ax.set_xlim(0, total_steps)
     ax.set_ylim(bottom=0)
@@ -341,14 +365,11 @@ def make_fig7(out):
         if df is None or "ep_length" not in df.columns or "global_step" not in df.columns:
             continue
         batch_step = df["global_step"] / num_envs
-        y = df["ep_length"]
-        w = adaptive_window(len(y))
-        smoothed = y.rolling(w, min_periods=1).mean()
-        ax.plot(batch_step.values, smoothed.values,
-                label=ALGO_DISPLAY[algo], color=ALGO_COLORS[algo])
+        gx, gy, _ = _resample_to_grid(batch_step, df["ep_length"], total_steps)
+        ax.plot(gx, gy, label=ALGO_DISPLAY[algo], color=ALGO_COLORS[algo])
     ax.axhline(y=1000, color="gray", linestyle="--", alpha=0.3)
     ax.set_xlabel("Batch Step")
-    ax.set_ylabel("Episode Length (steps, rolling mean)")
+    ax.set_ylabel("Episode Length (steps, mean)")
     ax.set_title("Survival Time: Episode Length vs Batch Step", fontweight="bold")
     ax.set_xlim(0, total_steps)
     ax.set_ylim(bottom=0)
