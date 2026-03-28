@@ -92,12 +92,13 @@
             "init_alpha": 0.2,
             "auto_alpha": true,
             "target_entropy": null,
+            "learning_starts": 1000,
             "total_steps": 20000
         },
         "TD3": {
             "num_of_action": 1,
             "hidden_dim": 256,
-            "learning_rate": 0.001,
+            "learning_rate": 0.0003,
             "tau": 0.005,
             "buffer_size": 2000000,
             "batch_size": 256,

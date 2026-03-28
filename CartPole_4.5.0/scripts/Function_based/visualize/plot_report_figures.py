@@ -67,6 +67,14 @@ ALGO_COLORS = {
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__)))))
 EXP_DIR = os.path.join(ROOT, "experiments", "suite_1_baseline")
+CFG_PATH = os.path.join(ROOT, "scripts", "Function_based", "configs", "rl_config.json")
+
+
+def _load_cfg():
+    if os.path.isfile(CFG_PATH):
+        with open(CFG_PATH) as f:
+            return json.load(f)
+    return {}
 
 
 def load_csv(algo):
@@ -84,33 +92,33 @@ def adaptive_window(n):
 
 
 # --------------------------------------------------------------------------- #
-# Fig 1: Learning Curves -- Return vs Episode
+# Fig 1: Learning Curves -- Return vs Batch Step
 # --------------------------------------------------------------------------- #
 def make_fig1(out):
     fig, ax = plt.subplots(figsize=(14, 5))
-    # Find the minimum episode count to set a common x-axis
-    min_eps = min(
-        len(load_csv(a)) for a in ALGOS
-        if load_csv(a) is not None and "ep_return" in load_csv(a).columns
-    )
-    max_x = min(min_eps, 20000)  # cap at 20K episodes for readability
+    cfg = _load_cfg()
+    num_envs = cfg.get("shared", {}).get("num_envs", 256)
+    total_steps = cfg.get("shared", {}).get("total_steps", 20000)
     for algo in ALGOS:
         df = load_csv(algo)
-        if df is None or "ep_return" not in df.columns:
+        if df is None or "ep_return" not in df.columns or "global_step" not in df.columns:
             continue
-        df = df.head(max_x)  # truncate to common range
+        # Convert global_step to batch step (0 .. total_steps)
+        batch_step = df["global_step"] / num_envs
         y = df["ep_return"]
         w = adaptive_window(len(y))
         smoothed = y.rolling(w, min_periods=1).mean()
         std = y.rolling(w, min_periods=1).std().fillna(0)
-        ax.plot(smoothed.values, label=ALGO_DISPLAY[algo], color=ALGO_COLORS[algo])
-        ax.fill_between(range(len(smoothed)),
+        ax.plot(batch_step.values, smoothed.values,
+                label=ALGO_DISPLAY[algo], color=ALGO_COLORS[algo])
+        ax.fill_between(batch_step.values,
                         (smoothed - std).values, (smoothed + std).values,
                         alpha=0.15, color=ALGO_COLORS[algo])
     ax.axhline(y=950, color="gray", linestyle="--", alpha=0.3)
-    ax.set_xlabel("Episode")
+    ax.set_xlabel("Batch Step")
     ax.set_ylabel("Episode Return (rolling mean +/- std)")
-    ax.set_title("Learning Efficiency: Return vs Training Episode", fontweight="bold")
+    ax.set_title("Learning Efficiency: Return vs Batch Step", fontweight="bold")
+    ax.set_xlim(0, total_steps)
     ax.set_ylim(bottom=0)
     ax.legend(loc="upper left")
     fig.tight_layout()

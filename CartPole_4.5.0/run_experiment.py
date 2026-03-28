@@ -213,7 +213,7 @@ def build_agent(algo_name: str, cfg: dict, shared: dict, device: torch.device):
             desired_kl=ac.get("desired_kl", 0.0),
         )
     elif algo_name == "SAC":
-        return SAC(
+        agent = SAC(
             device=device,
             num_of_action=ac["num_of_action"],
             action_range=action_range,
@@ -229,6 +229,8 @@ def build_agent(algo_name: str, cfg: dict, shared: dict, device: torch.device):
             auto_alpha=ac.get("auto_alpha", True),
             target_entropy=ac.get("target_entropy", None),
         )
+        agent.learning_starts = ac.get("learning_starts", 0)
+        return agent
     elif algo_name == "TD3":
         return TD3(
             device=device,
@@ -511,8 +513,9 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                 for i in range(num_envs):
                     agent.store_transition(obs[i], raw[i], float(rew_cpu[i]),
                                            next_obs[i], float(done_cpu[i]))
-                # SAC: UTD=1 (256 parallel envs already give dense data)
-                agent.update_policy()
+                # SAC: UTD=1 after learning_starts warmup
+                if step >= getattr(agent, 'learning_starts', 0):
+                    agent.update_policy()
 
             elif algo_name == "TD3":
                 a_min, a_max = agent.action_range
