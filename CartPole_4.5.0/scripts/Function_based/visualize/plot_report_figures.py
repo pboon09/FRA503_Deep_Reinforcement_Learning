@@ -656,6 +656,201 @@ def make_fig9(out):
 
 
 # --------------------------------------------------------------------------- #
+# Fig 11: Focused 2x2 Policy/Value Contrast (PPO vs TD3)
+# --------------------------------------------------------------------------- #
+def make_fig11_contrast(out, agent_a="PPO", agent_b="TD3"):
+    """Generate a 2x2 grid: (policy, value) x (robust agent, brittle agent)."""
+    import sys
+    sys.path.insert(0, ROOT)
+    sys.path.insert(0, os.path.join(ROOT, "RL_Algorithm"))
+    import torch
+
+    cfg_path = os.path.join(ROOT, "scripts", "Function_based", "configs", "rl_config.json")
+    if not os.path.isfile(cfg_path):
+        print("  [fig11] No config file, skipping.")
+        return
+    with open(cfg_path) as _f:
+        _cfg = json.load(_f)
+    _shared = _cfg["shared"]
+    model_dir = os.path.join(ROOT, "model", "Stabilize")
+
+    # --- Observation grid ---
+    angle_range = np.linspace(-0.25, 0.25, 100)
+    angvel_range = np.linspace(-3.0, 3.0, 100)
+    AA, VV = np.meshgrid(angle_range, angvel_range)
+    obs_grid = np.zeros((100 * 100, 4), dtype=np.float32)
+    obs_grid[:, 1] = AA.flatten()
+    obs_grid[:, 3] = VV.flatten()
+    obs_tensor = torch.tensor(obs_grid)
+
+    def _load_ac(algo):
+        _ac = _cfg["algorithms"].get(algo, {})
+        if algo == "PPO":
+            from RL_Algorithm.Function_based.PPO import PPO as Cls
+            agent = Cls(
+                device=torch.device("cpu"),
+                num_of_action=_ac.get("num_of_action", 1),
+                action_range=_shared["action_range"],
+                n_observations=_shared["n_observations"],
+                hidden_dims=_ac["hidden_dims"],
+                activation=_ac.get("activation", "elu"),
+                action_type=_ac.get("action_type", "continuous"),
+                init_noise_std=_ac.get("init_noise_std", 1.0),
+                num_learning_epochs=_ac["num_learning_epochs"],
+                num_mini_batches=_ac["num_mini_batches"],
+                clip_param=_ac["clip_param"],
+                gamma=_shared["discount_factor"],
+                lam=_ac["lam"],
+                value_loss_coef=_ac.get("value_loss_coef", 1.0),
+                entropy_coef=_ac.get("entropy_coef", 0.01),
+                learning_rate=_ac["learning_rate"],
+                max_grad_norm=_ac.get("max_grad_norm", 1.0),
+                desired_kl=_ac.get("desired_kl", 0.0),
+            )
+        elif algo in ("AC", "A2C"):
+            if algo == "AC":
+                from RL_Algorithm.Function_based.AC import AC as Cls
+            else:
+                from RL_Algorithm.Function_based.A2C import A2C as Cls
+            agent = Cls(
+                device=torch.device("cpu"),
+                num_of_action=_ac.get("num_of_action", 1),
+                action_range=_shared["action_range"],
+                n_observations=_shared["n_observations"],
+                hidden_dims=_ac["hidden_dims"],
+                activation=_ac.get("activation", "elu"),
+                action_type=_ac.get("action_type", "continuous"),
+                init_noise_std=_ac.get("init_noise_std", 1.0),
+                learning_rate=_ac["learning_rate"],
+                discount_factor=_shared["discount_factor"],
+                value_loss_coef=_ac.get("value_loss_coef", 0.5),
+                entropy_coef=_ac.get("entropy_coef", 0.01),
+                max_grad_norm=_ac.get("max_grad_norm", 0.5),
+            )
+        else:
+            return None
+        agent.load_model(os.path.join(model_dir, algo), f"{algo}_final.pth")
+        return agent.policy
+
+    def _load_td3():
+        _td3 = _cfg["algorithms"]["TD3"]
+        from RL_Algorithm.Function_based.TD3 import TD3 as Cls
+        agent = Cls(
+            device=torch.device("cpu"),
+            num_of_action=_td3.get("num_of_action", 1),
+            action_range=_shared["action_range"],
+            n_observations=_shared["n_observations"],
+            hidden_dim=_td3["hidden_dim"],
+            learning_rate=_td3["learning_rate"],
+            tau=_td3["tau"],
+            discount_factor=_shared["discount_factor"],
+            buffer_size=1000, batch_size=_td3["batch_size"],
+            exploration_noise=_td3["exploration_noise"],
+            target_noise=_td3["target_noise"],
+            target_noise_clip=_td3["target_noise_clip"],
+            policy_update_freq=_td3["policy_update_freq"],
+        )
+        agent.load_model(os.path.join(model_dir, "TD3"), "TD3_final.pth")
+        return agent
+
+    def _load_dqn():
+        _dqn = _cfg["algorithms"]["DQN"]
+        from RL_Algorithm.Function_based.DQN import DQN as Cls
+        agent = Cls(
+            device=torch.device("cpu"),
+            num_of_action=_dqn["num_of_action"],
+            action_range=_shared["action_range"],
+            n_observations=_shared["n_observations"],
+            hidden_dim=_dqn["hidden_dim"],
+            dropout=_dqn.get("dropout", 0.0),
+            learning_rate=_dqn["learning_rate"],
+            tau=_dqn["tau"],
+            initial_epsilon=0.0, epsilon_decay=0.0, final_epsilon=0.0,
+            discount_factor=_shared["discount_factor"],
+            buffer_size=1000, batch_size=_dqn["batch_size"],
+        )
+        agent.load_model(os.path.join(model_dir, "DQN"), "DQN_final.pth")
+        return agent
+
+    # --- Load models and compute surfaces ---
+    results = {}  # algo -> (policy_surface, value_surface)
+    for algo in [agent_a, agent_b]:
+        try:
+            if algo in ("PPO", "AC", "A2C"):
+                policy = _load_ac(algo)
+                policy.eval()
+                with torch.no_grad():
+                    act = policy.act_inference(obs_tensor).numpy().reshape(100, 100)
+                    val = policy.evaluate(obs_tensor).numpy().reshape(100, 100)
+                results[algo] = (act, val)
+            elif algo == "TD3":
+                agent = _load_td3()
+                agent.actor.eval()
+                agent.critic.eval()
+                with torch.no_grad():
+                    raw_act = agent.actor(obs_tensor)
+                    act_scaled = (raw_act.numpy() * (_shared["action_range"][1])).reshape(100, 100)
+                    q1, _ = agent.critic(obs_tensor, raw_act)
+                    val = q1.numpy().reshape(100, 100)
+                results[algo] = (act_scaled, val)
+            elif algo == "DQN":
+                agent = _load_dqn()
+                agent.policy_net.eval()
+                with torch.no_grad():
+                    q_vals = agent.policy_net(obs_tensor).numpy()
+                action_values = np.linspace(*_shared["action_range"], q_vals.shape[1])
+                act = action_values[q_vals.argmax(axis=1)].reshape(100, 100)
+                val = q_vals.max(axis=1).reshape(100, 100)
+                results[algo] = (act, val)
+        except Exception as e:
+            print(f"  [fig11] Failed to load {algo}: {e}")
+
+    if len(results) < 2:
+        print(f"  [fig11] Need 2 models, got {list(results.keys())}. Skipping.")
+        return
+
+    # --- Plot 2x2 grid ---
+    fig = plt.figure(figsize=(12, 10))
+    titles = [
+        (agent_a, "Policy Surface", 0),
+        (agent_a, "Value Surface", 1),
+        (agent_b, "Policy Surface", 0),
+        (agent_b, "Value Surface", 1),
+    ]
+    labels = [
+        f"{ALGO_DISPLAY.get(agent_a, agent_a)} (Robust)",
+        f"{ALGO_DISPLAY.get(agent_a, agent_a)} (Robust)",
+        f"{ALGO_DISPLAY.get(agent_b, agent_b)} (Brittle)",
+        f"{ALGO_DISPLAY.get(agent_b, agent_b)} (Brittle)",
+    ]
+    cmaps = ["RdBu_r", "viridis", "RdBu_r", "viridis"]
+    zlabels = ["Action (N)", "V(s)", "Action (N)", "Q(s,a)"]
+
+    for idx, (algo, surf_type, surf_idx) in enumerate(titles):
+        ax = fig.add_subplot(2, 2, idx + 1, projection="3d")
+        surface_data = results[algo][surf_idx]
+        ax.plot_surface(AA, VV, surface_data, cmap=cmaps[idx], alpha=0.85,
+                        rstride=2, cstride=2, edgecolor="none")
+        ax.set_xlabel("Pole Angle", fontsize=10)
+        ax.set_ylabel("Ang. Velocity", fontsize=10)
+        ax.set_zlabel(zlabels[idx], fontsize=10)
+        ax.set_title(f"{labels[idx]}: {surf_type}", fontweight="bold", fontsize=11)
+        ax.view_init(elev=25, azim=-60)
+
+    fig.suptitle(
+        f"Policy and Value Surfaces: {ALGO_DISPLAY.get(agent_a, agent_a)} vs "
+        f"{ALGO_DISPLAY.get(agent_b, agent_b)}\n"
+        r"[cart_pos=0, cart_vel=0, varying $\theta$ and $\dot{\theta}$]",
+        fontsize=14, fontweight="bold",
+    )
+    fig.tight_layout(rect=[0, 0, 1, 0.93])
+    fname = "fig3_policy_value_surfaces.png"
+    fig.savefig(os.path.join(out, fname), dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved {fname}")
+
+
+# --------------------------------------------------------------------------- #
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", default=os.path.join(ROOT, "figures"))
@@ -674,6 +869,7 @@ def main():
     make_fig7(args.output)
     make_fig8(args.output)
     make_fig9(args.output)
+    make_fig11_contrast(args.output, agent_a="PPO", agent_b="TD3")
 
     print("Done.")
 
