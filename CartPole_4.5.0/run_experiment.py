@@ -696,6 +696,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg,
         print(f"  Algorithm: {algo_name} ({num_envs} envs, {t_steps} batch steps)")
         print(f"{'='*60}")
 
+        # Reset seed before each algorithm for reproducibility
+        torch.manual_seed(args_cli.seed)
+        torch.cuda.manual_seed_all(args_cli.seed)
+        np.random.seed(args_cli.seed)
+        random.seed(args_cli.seed)
+
         try:
             # Build agent
             agent = build_agent(algo_name, algo_cfg, shared, device)
