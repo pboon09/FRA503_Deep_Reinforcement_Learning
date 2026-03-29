@@ -236,6 +236,8 @@ class DQN(OffPolicyAlgorithm):
         self.optimizer.step()
         # ====================================== #
 
+        return {"critic_loss": loss.item()}
+
     def update_target_networks(self):
         # ========= put your code here ========= #
         for target_param, param in zip(self.target_net.parameters(), self.policy_net.parameters()):

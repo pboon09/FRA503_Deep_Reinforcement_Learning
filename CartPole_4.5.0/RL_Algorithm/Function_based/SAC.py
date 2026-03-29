@@ -367,6 +367,12 @@ class SAC(OffPolicyAlgorithm):
 
         self.update_target_networks()
 
+        return {
+            "critic_loss": critic_loss.item(),
+            "actor_loss": actor_loss.item(),
+            "entropy": -new_log_prob.mean().item(),
+        }
+
     def update_target_networks(self):
         """
         Overrides the no-op in OffPolicyAlgorithm.

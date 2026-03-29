@@ -38,7 +38,7 @@ parser.add_argument("--config", type=str,
                     default=os.path.join(os.path.dirname(__file__),
                                          "scripts", "Function_based", "configs", "rl_config.json"),
                     help="Path to rl_config.json.")
-parser.add_argument("--deploy_episodes", type=int, default=10,
+parser.add_argument("--deploy_episodes", type=int, default=100,
                     help="Number of deployment (evaluation) episodes.")
 parser.add_argument("--algo", type=str, default=None,
                     help="Run only this algorithm (e.g. --algo SAC). Runs all if omitted.")
@@ -317,11 +317,12 @@ def _select_action_batch(agent, algo_name, obs, device):
 
 
 def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unused,
-                    num_envs, csv_writer, device):
+                    num_envs, csv_writer, device, loss_writer=None):
     """
     Train using 256 parallel envs. Budget = total_steps batch steps.
     All algorithms use the same budget for fair comparison.
     Each completed episode is logged to CSV.
+    Losses are logged per update step to loss_writer (separate CSV).
     """
     total_steps = algo_cfg.get("total_steps", shared_cfg.get("total_steps", 20000))
     global_step = 0
@@ -381,7 +382,18 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
 
                 agent.compute_returns(obs)
 
-            agent.update()
+            loss_info = agent.update()
+            if loss_writer is not None and loss_info:
+                row = {"update_step": iteration}
+                if algo_name == "PPO":
+                    row["actor_loss"] = loss_info.get("surrogate", "")
+                    row["critic_loss"] = loss_info.get("value", "")
+                    row["entropy"] = loss_info.get("entropy", "")
+                else:  # A2C
+                    row["actor_loss"] = loss_info.get("actor", "")
+                    row["critic_loss"] = loss_info.get("value", "")
+                    row["entropy"] = loss_info.get("entropy", "")
+                loss_writer.writerow(row)
             pbar.update(1)
 
         pbar.close()
@@ -397,6 +409,7 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
             update_every = 2  # very frequent updates for short episodes
             agent.optimizer.zero_grad()
 
+        loss_update_step = 0
         pbar = tqdm(total=total_steps, desc=f"Training {algo_name}", ncols=100)
 
         for step in range(total_steps):
@@ -437,14 +450,25 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                                            ns, bool(term_cpu[i]))
                 # Single gradient step after learning_starts warmup
                 if step >= agent.learning_starts:
-                    agent.update_policy()
+                    loss_info = agent.update_policy()
                     agent.update_target_networks()
+                    if loss_writer is not None and loss_info:
+                        loss_writer.writerow({
+                            "update_step": loss_update_step,
+                            "actor_loss": "",
+                            "critic_loss": loss_info.get("critic_loss", ""),
+                            "entropy": "",
+                        })
+                        loss_update_step += 1
                 agent.decay_epsilon()
 
             elif algo_name == "MC_REINFORCE":
                 action, _ = extra
                 rew_cpu = reward.cpu().numpy()
                 done_cpu = done.cpu().numpy()
+                mc_loss_accum = 0.0
+                mc_entropy_accum = 0.0
+                mc_count = 0
                 for i in range(num_envs):
                     env_obs[i].append(obs[i].detach())
                     env_actions[i].append(action[i].detach())
@@ -461,6 +485,12 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                         returns = agent.calculate_stepwise_returns(env_rewards[i])
                         loss = agent.calculate_loss(returns, lp, ep_obs) / update_every
                         loss.backward()
+                        mc_loss_accum += loss.item() * update_every
+                        ent = dist.entropy()
+                        if agent.action_type == "continuous":
+                            ent = ent.sum(-1)
+                        mc_entropy_accum += ent.mean().item()
+                        mc_count += 1
                         num_updates += 1
                     if done_cpu[i]:
                         env_obs[i] = []
@@ -472,12 +502,24 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                         torch.nn.utils.clip_grad_norm_(agent.value_net.parameters(), 0.5)
                     agent.optimizer.step()
                     agent.optimizer.zero_grad()
+                    if loss_writer is not None and mc_count > 0:
+                        loss_writer.writerow({
+                            "update_step": loss_update_step,
+                            "actor_loss": mc_loss_accum / mc_count,
+                            "critic_loss": "",
+                            "entropy": mc_entropy_accum / mc_count,
+                        })
+                        loss_update_step += 1
                     num_updates = 0
 
             elif algo_name == "AC":
                 action, _, _ = extra
                 done_cpu = done.cpu().numpy()
                 rew_cpu = reward.cpu().numpy()
+                ac_actor_accum = 0.0
+                ac_critic_accum = 0.0
+                ac_entropy_accum = 0.0
+                ac_count = 0
                 for i in range(num_envs):
                     env_obs[i].append(obs[i].detach())
                     env_actions[i].append(action[i].detach())
@@ -494,6 +536,11 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                         al, cl = agent.calculate_loss(lp, vals, returns)
                         loss = (al + agent.value_loss_coef * cl) / update_every
                         loss.backward()
+                        ac_actor_accum += al.item()
+                        ac_critic_accum += cl.item()
+                        if agent.policy.distribution is not None:
+                            ac_entropy_accum += agent.policy.entropy.mean().item()
+                        ac_count += 1
                         num_updates += 1
                     if done_cpu[i]:
                         env_obs[i] = []
@@ -503,6 +550,14 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                     torch.nn.utils.clip_grad_norm_(agent.policy.parameters(), agent.max_grad_norm)
                     agent.optimizer.step()
                     agent.optimizer.zero_grad()
+                    if loss_writer is not None and ac_count > 0:
+                        loss_writer.writerow({
+                            "update_step": loss_update_step,
+                            "actor_loss": ac_actor_accum / ac_count,
+                            "critic_loss": ac_critic_accum / ac_count,
+                            "entropy": ac_entropy_accum / ac_count,
+                        })
+                        loss_update_step += 1
                     num_updates = 0
 
             elif algo_name == "SAC":
@@ -516,7 +571,15 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                 # SAC: multiple gradient steps per batch step (UTD=4)
                 if step >= getattr(agent, 'learning_starts', 0):
                     for _ in range(4):
-                        agent.update_policy()
+                        loss_info = agent.update_policy()
+                        if loss_writer is not None and loss_info:
+                            loss_writer.writerow({
+                                "update_step": loss_update_step,
+                                "actor_loss": loss_info.get("actor_loss", ""),
+                                "critic_loss": loss_info.get("critic_loss", ""),
+                                "entropy": loss_info.get("entropy", ""),
+                            })
+                            loss_update_step += 1
 
             elif algo_name == "TD3":
                 a_min, a_max = agent.action_range
@@ -529,7 +592,15 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                 # TD3: multiple gradient steps per batch step (UTD=4)
                 if step >= agent.learning_starts:
                     for _ in range(4):
-                        agent.update_policy()
+                        loss_info = agent.update_policy()
+                        if loss_writer is not None and loss_info:
+                            loss_writer.writerow({
+                                "update_step": loss_update_step,
+                                "actor_loss": loss_info.get("actor_loss", ""),
+                                "critic_loss": loss_info.get("critic_loss", ""),
+                                "entropy": "",
+                            })
+                            loss_update_step += 1
 
             # --- Track completed episodes ---
             ep_returns += reward
@@ -571,8 +642,10 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
             agent.w = agent._w_gpu.cpu().numpy()
 
 
-def deploy(agent, env, algo_name, n_episodes, max_steps, csv_writer, device):
-    """Deploy (evaluate) using the same 256-env. Track env[0] for episode returns."""
+def deploy(agent, env, algo_name, n_episodes, max_steps, csv_writer, device,
+           traj_writer=None):
+    """Deploy (evaluate) using the same 256-env. Track env[0] for episode returns.
+    Optionally log per-step state/action trajectories to traj_writer."""
     print(f"\n  Deploying {algo_name} for {n_episodes} episodes...")
 
     obs, _ = env.reset()
@@ -580,7 +653,14 @@ def deploy(agent, env, algo_name, n_episodes, max_steps, csv_writer, device):
     num_envs = obs.shape[0]
     ep_returns = torch.zeros(num_envs, device=device)
     ep_lengths = torch.zeros(num_envs, device=device)
+    # Track which env maps to which episode (for trajectory logging)
+    env_episode_id = torch.full((num_envs,), -1, dtype=torch.long, device=device)
+    next_ep_to_assign = 0
     completed = 0
+    # Assign initial episodes to envs
+    for i in range(min(num_envs, n_episodes)):
+        env_episode_id[i] = next_ep_to_assign
+        next_ep_to_assign += 1
 
     while completed < n_episodes:
         with torch.no_grad():
@@ -629,6 +709,23 @@ def deploy(agent, env, algo_name, n_episodes, max_steps, csv_writer, device):
             if action.dim() == 1:
                 action = action.unsqueeze(-1)
 
+            # Log per-step trajectory for active episodes (before stepping)
+            if traj_writer is not None:
+                obs_cpu = obs.cpu().numpy()
+                act_cpu = action.cpu().numpy()
+                for i in range(num_envs):
+                    ep_id = env_episode_id[i].item()
+                    if 0 <= ep_id < n_episodes:
+                        traj_writer.writerow({
+                            "episode": ep_id,
+                            "step": int(ep_lengths[i].item()),
+                            "cart_pos": obs_cpu[i, 0],
+                            "pole_angle": obs_cpu[i, 1],
+                            "cart_vel": obs_cpu[i, 2],
+                            "pole_ang_vel": obs_cpu[i, 3],
+                            "action": act_cpu[i, 0],
+                        })
+
             next_obs, reward, terminated, truncated, info = env.step(action)
             next_obs = extract_obs(next_obs)
             done = (terminated | truncated).bool()
@@ -640,16 +737,24 @@ def deploy(agent, env, algo_name, n_episodes, max_steps, csv_writer, device):
             if done.any():
                 done_idx = done.nonzero(as_tuple=True)[0]
                 for idx in done_idx:
-                    if completed < n_episodes:
+                    ep_id = env_episode_id[idx].item()
+                    if 0 <= ep_id < n_episodes:
                         ret = ep_returns[idx].item()
                         length = int(ep_lengths[idx].item())
                         csv_writer.writerow({
-                            "episode": completed,
+                            "episode": ep_id,
                             "ep_return": ret,
                             "ep_length": length,
                         })
-                        print(f"    Episode {completed}: return={ret:.1f}, length={length}")
                         completed += 1
+                        if completed <= 10 or completed % 10 == 0:
+                            print(f"    Episode {ep_id}: return={ret:.1f}, length={length}")
+                    # Assign next episode to this env
+                    if next_ep_to_assign < n_episodes:
+                        env_episode_id[idx] = next_ep_to_assign
+                        next_ep_to_assign += 1
+                    else:
+                        env_episode_id[idx] = -1
                 ep_returns[done] = 0.0
                 ep_lengths[done] = 0.0
 
@@ -708,12 +813,18 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg,
 
             # ---- Train ---- #
             train_csv_path = os.path.join(exp_dir, f"{algo_name}.csv")
-            with open(train_csv_path, "w", newline="") as f:
+            loss_csv_path = os.path.join(exp_dir, f"{algo_name}_losses.csv")
+            with open(train_csv_path, "w", newline="") as f, \
+                 open(loss_csv_path, "w", newline="") as lf:
                 writer = csv.DictWriter(f, fieldnames=[
                     "episode", "ep_return", "ep_length", "global_step", "epsilon"])
                 writer.writeheader()
+                loss_fields = ["update_step", "actor_loss", "critic_loss", "entropy"]
+                loss_writer = csv.DictWriter(lf, fieldnames=loss_fields)
+                loss_writer.writeheader()
                 train_algorithm(agent, env, algo_name, algo_cfg, shared,
-                                t_steps, num_envs, writer, device)
+                                t_steps, num_envs, writer, device,
+                                loss_writer=loss_writer)
 
             # Save final model
             if algo_name == "Linear_Q":
@@ -725,10 +836,17 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg,
 
             # ---- Deploy (reuse same env, don't close) ---- #
             deploy_csv_path = os.path.join(exp_dir, f"{algo_name}_deploy.csv")
-            with open(deploy_csv_path, "w", newline="") as f:
+            traj_csv_path = os.path.join(exp_dir, f"{algo_name}_deploy_trajectory.csv")
+            with open(deploy_csv_path, "w", newline="") as f, \
+                 open(traj_csv_path, "w", newline="") as tf:
                 writer = csv.DictWriter(f, fieldnames=["episode", "ep_return", "ep_length"])
                 writer.writeheader()
-                deploy(agent, env, algo_name, args_cli.deploy_episodes, 1000, writer, device)
+                traj_fields = ["episode", "step", "cart_pos", "pole_angle",
+                               "cart_vel", "pole_ang_vel", "action"]
+                traj_writer = csv.DictWriter(tf, fieldnames=traj_fields)
+                traj_writer.writeheader()
+                deploy(agent, env, algo_name, args_cli.deploy_episodes, 1000,
+                       writer, device, traj_writer=traj_writer)
 
             print(f"  Deployment complete. Results saved to {deploy_csv_path}")
 

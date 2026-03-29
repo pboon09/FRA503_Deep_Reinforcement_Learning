@@ -318,8 +318,10 @@ class TD3(OffPolicyAlgorithm):
         self.critic_optimizer.step()
 
         # --- Delayed actor update (fresh forward pass after critic update) ---
+        actor_loss_val = None
         if self.total_steps % self.policy_update_freq == 0:
             actor_loss = -self.critic.Q1(states, self.actor(states)).mean()
+            actor_loss_val = actor_loss.item()
             self.actor_optimizer.zero_grad()
             actor_loss.backward()
             self.actor_optimizer.step()
@@ -327,6 +329,11 @@ class TD3(OffPolicyAlgorithm):
         # ====================================== #
 
         self.total_steps += 1
+
+        result = {"critic_loss": critic_loss.item()}
+        if actor_loss_val is not None:
+            result["actor_loss"] = actor_loss_val
+        return result
 
     def update_target_networks(self):
         # ========= put your code here ========= #

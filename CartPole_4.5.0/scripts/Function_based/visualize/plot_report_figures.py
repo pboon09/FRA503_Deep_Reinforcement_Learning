@@ -233,7 +233,8 @@ def make_fig3(out):
     ax2.set_ylim(bottom=0)
     ax2.legend(fontsize=9)
 
-    fig.suptitle("Deployment Performance (Deterministic Policy, 10 Episodes)",
+    n_deploy = len(list(deploy_data.values())[0]) if deploy_data else 10
+    fig.suptitle(f"Deployment Performance (Deterministic Policy, {n_deploy} Episodes)",
                  fontsize=14, fontweight="bold")
     fig.tight_layout()
     fig.savefig(os.path.join(out, "fig3_deployment.png"), bbox_inches="tight")
@@ -404,7 +405,7 @@ def make_fig8(out):
         patch.set_facecolor(c)
         patch.set_alpha(0.7)
     ax.set_ylabel("Episode Return")
-    ax.set_title("Deployment Performance Distribution (10 Episodes)", fontweight="bold")
+    ax.set_title("Deployment Performance Distribution", fontweight="bold")
     ax.set_ylim(bottom=0)
     fig.tight_layout()
     fig.savefig(os.path.join(out, "fig8_deployment_boxplot.png"), bbox_inches="tight")
@@ -851,6 +852,488 @@ def make_fig11_contrast(out, agent_a="PPO", agent_b="TD3"):
 
 
 # --------------------------------------------------------------------------- #
+# Data loaders for new CSV files
+# --------------------------------------------------------------------------- #
+def load_losses(algo):
+    p = os.path.join(EXP_DIR, f"{algo}_losses.csv")
+    return pd.read_csv(p) if os.path.isfile(p) else None
+
+
+def load_trajectory(algo):
+    p = os.path.join(EXP_DIR, f"{algo}_deploy_trajectory.csv")
+    return pd.read_csv(p) if os.path.isfile(p) else None
+
+
+# --------------------------------------------------------------------------- #
+# Per-algorithm plots (friend's style)
+# --------------------------------------------------------------------------- #
+def make_per_algo_plots(out):
+    """Generate per-algorithm plots: learning curve, reward w/ std,
+    steps vs reward, episode length, actor loss, critic loss, entropy."""
+    smooth_w = 50
+    smooth_w_std = 100
+
+    for algo in ALGOS:
+        algo_dir = os.path.join(out, algo)
+        os.makedirs(algo_dir, exist_ok=True)
+
+        df = load_csv(algo)
+        loss_df = load_losses(algo)
+        color = ALGO_COLORS[algo]
+        name = ALGO_DISPLAY[algo]
+
+        if df is None:
+            continue
+
+        # 1. Learning curve (smoothed reward vs episode)
+        fig, ax = plt.subplots(figsize=(10, 5))
+        smoothed = df["ep_return"].rolling(smooth_w, min_periods=1).mean()
+        ax.plot(df["episode"], smoothed, color=color, label=f"Smoothed (w={smooth_w})")
+        ax.set_xlabel("Episode")
+        ax.set_ylabel("Cumulative Reward")
+        ax.set_title(f"{name} \u2014 Learning Curve (Reward)", fontweight="bold")
+        ax.legend()
+        fig.tight_layout()
+        fig.savefig(os.path.join(algo_dir, "learning_curve.png"), bbox_inches="tight")
+        plt.close(fig)
+
+        # 2. Reward with std (mean +/- 1 std band)
+        fig, ax = plt.subplots(figsize=(10, 5))
+        mean_r = df["ep_return"].rolling(smooth_w_std, min_periods=1).mean()
+        std_r = df["ep_return"].rolling(smooth_w_std, min_periods=1).std().fillna(0)
+        ax.plot(df["episode"], mean_r, color=color, label=f"Mean (w={smooth_w_std})")
+        ax.fill_between(df["episode"], mean_r - std_r, mean_r + std_r,
+                        alpha=0.2, color=color, label="\u00b11 std")
+        ax.axhline(y=0, color="gray", linestyle="--", alpha=0.3)
+        ax.set_xlabel("Episode")
+        ax.set_ylabel("Cumulative Reward")
+        ax.set_title(f"{name} \u2014 Reward Stability (Mean \u00b1 Std)", fontweight="bold")
+        ax.legend()
+        fig.tight_layout()
+        fig.savefig(os.path.join(algo_dir, "reward_with_std.png"), bbox_inches="tight")
+        plt.close(fig)
+
+        # 3. Steps vs reward (reward vs total env steps)
+        fig, ax = plt.subplots(figsize=(10, 5))
+        smoothed = df["ep_return"].rolling(smooth_w, min_periods=1).mean()
+        steps_k = df["global_step"] / 1000
+        ax.plot(steps_k, smoothed, color=color, label="Smoothed")
+        ax.set_xlabel("Total Env Steps")
+        ax.set_ylabel("Cumulative Reward")
+        ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.0f}k"))
+        ax.set_title(f"{name} \u2014 Reward vs Environment Steps", fontweight="bold")
+        ax.legend()
+        fig.tight_layout()
+        fig.savefig(os.path.join(algo_dir, "steps_vs_reward.png"), bbox_inches="tight")
+        plt.close(fig)
+
+        # 4. Episode length curve
+        fig, ax = plt.subplots(figsize=(10, 5))
+        smoothed_len = df["ep_length"].rolling(smooth_w, min_periods=1).mean()
+        ax.plot(df["episode"], smoothed_len, color=color, label=f"Smoothed (w={smooth_w})")
+        ax.axhline(y=1000, color="gray", linestyle="--", alpha=0.5, label="Max steps (1000)")
+        ax.set_xlabel("Episode")
+        ax.set_ylabel("Steps Survived")
+        ax.set_title(f"{name} \u2014 Episode Length", fontweight="bold")
+        ax.legend()
+        fig.tight_layout()
+        fig.savefig(os.path.join(algo_dir, "episode_length_curve.png"), bbox_inches="tight")
+        plt.close(fig)
+
+        # 5. Epsilon curve (value-based only)
+        if algo in ("Linear_Q", "DQN") and "epsilon" in df.columns:
+            fig, ax = plt.subplots(figsize=(10, 5))
+            ax.plot(df["episode"], df["epsilon"], color=color, label="Epsilon")
+            ax.set_xlabel("Episode")
+            ax.set_ylabel("Epsilon")
+            ax.set_title(f"{name} \u2014 Epsilon Decay", fontweight="bold")
+            ax.set_ylim(bottom=0, top=1.05)
+            ax.legend()
+            fig.tight_layout()
+            fig.savefig(os.path.join(algo_dir, "epsilon_curve.png"), bbox_inches="tight")
+            plt.close(fig)
+
+        # Loss plots (from losses CSV)
+        if loss_df is not None and len(loss_df) > 0:
+            loss_smooth = max(1, len(loss_df) // 50)
+
+            # 6. Actor loss curve
+            if "actor_loss" in loss_df.columns:
+                al = pd.to_numeric(loss_df["actor_loss"], errors="coerce")
+                valid = al.dropna()
+                if len(valid) > 0:
+                    fig, ax = plt.subplots(figsize=(10, 5))
+                    smoothed_al = valid.rolling(loss_smooth, min_periods=1).mean()
+                    ax.plot(valid.index, smoothed_al, color=color, label="Smoothed")
+                    ax.set_xlabel("Update step")
+                    ax.set_ylabel("Actor Loss")
+                    ax.set_title(f"{name} \u2014 Actor Loss", fontweight="bold")
+                    ax.legend()
+                    fig.tight_layout()
+                    fig.savefig(os.path.join(algo_dir, "actor_loss_curve.png"), bbox_inches="tight")
+                    plt.close(fig)
+
+            # 7. Critic loss curve
+            if "critic_loss" in loss_df.columns:
+                cl = pd.to_numeric(loss_df["critic_loss"], errors="coerce")
+                valid = cl.dropna()
+                if len(valid) > 0:
+                    fig, ax = plt.subplots(figsize=(10, 5))
+                    smoothed_cl = valid.rolling(loss_smooth, min_periods=1).mean()
+                    ax.plot(valid.index, smoothed_cl, color="#FF8C00", label="Smoothed")
+                    ax.set_xlabel("Update step")
+                    ax.set_ylabel("Critic Loss")
+                    ax.set_title(f"{name} \u2014 Critic / Value Loss", fontweight="bold")
+                    ax.legend()
+                    fig.tight_layout()
+                    fig.savefig(os.path.join(algo_dir, "critic_loss_curve.png"), bbox_inches="tight")
+                    plt.close(fig)
+
+            # 8. Entropy curve
+            if "entropy" in loss_df.columns:
+                ent = pd.to_numeric(loss_df["entropy"], errors="coerce")
+                valid = ent.dropna()
+                if len(valid) > 0:
+                    fig, ax = plt.subplots(figsize=(10, 5))
+                    smoothed_ent = valid.rolling(loss_smooth, min_periods=1).mean()
+                    ax.plot(valid.index, smoothed_ent, color=color, label="Smoothed")
+                    ax.set_xlabel("Update step")
+                    ax.set_ylabel("Entropy")
+                    ax.set_title(f"{name} \u2014 Policy Entropy", fontweight="bold")
+                    ax.legend()
+                    fig.tight_layout()
+                    fig.savefig(os.path.join(algo_dir, "entropy_curve.png"), bbox_inches="tight")
+                    plt.close(fig)
+
+        print(f"  Saved per-algorithm plots for {name}")
+
+
+# --------------------------------------------------------------------------- #
+# Comparison: Actor Loss, Critic Loss, Entropy across algorithms
+# --------------------------------------------------------------------------- #
+def make_comparison_losses(out):
+    """Comparison plots for actor loss, critic loss, and entropy."""
+    comp_dir = os.path.join(out, "comparisons")
+    os.makedirs(comp_dir, exist_ok=True)
+
+    # Actor loss comparison (actor-critic algorithms only)
+    fig_al, ax_al = plt.subplots(figsize=(14, 5))
+    fig_cl, ax_cl = plt.subplots(figsize=(14, 5))
+    fig_ent, ax_ent = plt.subplots(figsize=(14, 5))
+    plotted_al, plotted_cl, plotted_ent = False, False, False
+
+    for algo in ALGOS:
+        loss_df = load_losses(algo)
+        if loss_df is None or len(loss_df) == 0:
+            continue
+        color = ALGO_COLORS[algo]
+        name = ALGO_DISPLAY[algo]
+        smooth = max(1, len(loss_df) // 50)
+
+        if "actor_loss" in loss_df.columns:
+            al = pd.to_numeric(loss_df["actor_loss"], errors="coerce").dropna()
+            if len(al) > 0:
+                smoothed = al.rolling(smooth, min_periods=1).mean()
+                ax_al.plot(al.index, smoothed, color=color, label=name)
+                plotted_al = True
+
+        if "critic_loss" in loss_df.columns:
+            cl = pd.to_numeric(loss_df["critic_loss"], errors="coerce").dropna()
+            if len(cl) > 0:
+                smoothed = cl.rolling(smooth, min_periods=1).mean()
+                ax_cl.plot(cl.index, smoothed, color=color, label=name)
+                plotted_cl = True
+
+        if "entropy" in loss_df.columns:
+            ent = pd.to_numeric(loss_df["entropy"], errors="coerce").dropna()
+            if len(ent) > 0:
+                smoothed = ent.rolling(smooth, min_periods=1).mean()
+                ax_ent.plot(ent.index, smoothed, color=color, label=name)
+                plotted_ent = True
+
+    if plotted_al:
+        ax_al.axhline(y=0, color="gray", linestyle="--", alpha=0.3)
+        ax_al.set_xlabel("Update step")
+        ax_al.set_ylabel("Actor Loss")
+        ax_al.set_title("Neural Algorithms \u2014 Actor Loss (Smoothed)", fontweight="bold")
+        ax_al.legend()
+        fig_al.tight_layout()
+        fig_al.savefig(os.path.join(comp_dir, "comparison_actor_loss.png"), bbox_inches="tight")
+        print("  Saved comparisons/comparison_actor_loss.png")
+    plt.close(fig_al)
+
+    if plotted_cl:
+        ax_cl.axhline(y=0, color="gray", linestyle="--", alpha=0.3)
+        ax_cl.set_xlabel("Update step")
+        ax_cl.set_ylabel("Critic Loss")
+        ax_cl.set_title("All Algorithms \u2014 Critic Loss (Smoothed)", fontweight="bold")
+        ax_cl.legend()
+        fig_cl.tight_layout()
+        fig_cl.savefig(os.path.join(comp_dir, "comparison_critic_loss.png"), bbox_inches="tight")
+        print("  Saved comparisons/comparison_critic_loss.png")
+    plt.close(fig_cl)
+
+    if plotted_ent:
+        ax_ent.set_xlabel("Update step")
+        ax_ent.set_ylabel("Entropy")
+        ax_ent.set_title("Policy Entropy Comparison (Smoothed)", fontweight="bold")
+        ax_ent.legend()
+        fig_ent.tight_layout()
+        fig_ent.savefig(os.path.join(comp_dir, "comparison_entropy.png"), bbox_inches="tight")
+        print("  Saved comparisons/comparison_entropy.png")
+    plt.close(fig_ent)
+
+    # Also save comparison reward and episode length in comparisons folder
+    fig_r, ax_r = plt.subplots(figsize=(14, 5))
+    fig_el, ax_el = plt.subplots(figsize=(14, 5))
+    for algo in ALGOS:
+        df = load_csv(algo)
+        if df is None:
+            continue
+        color = ALGO_COLORS[algo]
+        name = ALGO_DISPLAY[algo]
+        smooth = max(1, len(df) // 20)
+        smoothed_r = df["ep_return"].rolling(smooth, min_periods=1).mean()
+        ax_r.plot(df["episode"], smoothed_r, color=color, label=name)
+        smoothed_el = df["ep_length"].rolling(smooth, min_periods=1).mean()
+        ax_el.plot(df["episode"], smoothed_el, color=color, label=name)
+
+    ax_r.set_xlabel("Episode")
+    ax_r.set_ylabel("Cumulative Reward")
+    ax_r.set_title("All Algorithms \u2014 Cumulative Reward (Smoothed)", fontweight="bold")
+    ax_r.legend()
+    fig_r.tight_layout()
+    fig_r.savefig(os.path.join(comp_dir, "comparison_reward.png"), bbox_inches="tight")
+    plt.close(fig_r)
+    print("  Saved comparisons/comparison_reward.png")
+
+    ax_el.set_xlabel("Episode")
+    ax_el.set_ylabel("Episode Length")
+    ax_el.set_title("All Algorithms \u2014 Episode Length (Smoothed)", fontweight="bold")
+    ax_el.legend()
+    fig_el.tight_layout()
+    fig_el.savefig(os.path.join(comp_dir, "comparison_ep_length.png"), bbox_inches="tight")
+    plt.close(fig_el)
+    print("  Saved comparisons/comparison_ep_length.png")
+
+
+# --------------------------------------------------------------------------- #
+# Deployment plots (friend's style)
+# --------------------------------------------------------------------------- #
+def make_deployment_plots(out):
+    """Per-algorithm and comparison deployment plots."""
+    deploy_dir = os.path.join(out, "deployment")
+    os.makedirs(deploy_dir, exist_ok=True)
+
+    deploy_data = {}
+    for algo in ALGOS:
+        df = load_deploy(algo)
+        if df is not None and "ep_return" in df.columns:
+            deploy_data[algo] = df
+
+    if not deploy_data:
+        print("  [deployment] No data, skipping.")
+        return
+
+    # --- Deployment avg reward bar chart ---
+    fig, ax = plt.subplots(figsize=(12, 6))
+    names, means, colors_list = [], [], []
+    for algo in ALGOS:
+        if algo not in deploy_data:
+            continue
+        df = deploy_data[algo]
+        names.append(ALGO_DISPLAY[algo])
+        means.append(df["ep_return"].mean())
+        colors_list.append(ALGO_COLORS[algo])
+    x = np.arange(len(names))
+    bars = ax.bar(x, means, color=colors_list, alpha=0.85,
+                  edgecolor="black", linewidth=0.8, width=0.6)
+    ax.set_xticks(x)
+    ax.set_xticklabels(names, fontsize=10, rotation=25)
+    ax.set_ylabel("Avg Reward")
+    ax.set_title("Deployment \u2014 Average Reward", fontweight="bold")
+    ax.set_ylim(bottom=0)
+    for i, m in enumerate(means):
+        ax.text(i, m + ax.get_ylim()[1] * 0.01, f"{m:.1f}",
+                ha="center", va="bottom", fontsize=10, fontweight="bold",
+                color=colors_list[i])
+    fig.tight_layout()
+    fig.savefig(os.path.join(deploy_dir, "deployment_reward.png"), bbox_inches="tight")
+    plt.close(fig)
+    print("  Saved deployment/deployment_reward.png")
+
+    # --- Per-episode reward scatter ---
+    fig, ax = plt.subplots(figsize=(14, 5))
+    for algo in ALGOS:
+        if algo not in deploy_data:
+            continue
+        df = deploy_data[algo]
+        ax.plot(df["episode"], df["ep_return"], marker=".", markersize=3,
+                linewidth=0.8, label=ALGO_DISPLAY[algo], color=ALGO_COLORS[algo],
+                alpha=0.8)
+    ax.set_xlabel("Deployment Episode")
+    ax.set_ylabel("Cumulative Reward")
+    ax.set_title("Deployment \u2014 Per-Episode Reward (Greedy Policy)", fontweight="bold")
+    ax.legend(fontsize=9, ncol=2)
+    fig.tight_layout()
+    fig.savefig(os.path.join(deploy_dir, "deployment_reward_per_ep.png"), bbox_inches="tight")
+    plt.close(fig)
+    print("  Saved deployment/deployment_reward_per_ep.png")
+
+    # --- Avg episode length bar ---
+    fig, ax = plt.subplots(figsize=(12, 6))
+    names2, lens2, colors2 = [], [], []
+    for algo in ALGOS:
+        if algo not in deploy_data:
+            continue
+        df = deploy_data[algo]
+        names2.append(ALGO_DISPLAY[algo])
+        lens2.append(df["ep_length"].mean())
+        colors2.append(ALGO_COLORS[algo])
+    x2 = np.arange(len(names2))
+    ax.bar(x2, lens2, color=colors2, alpha=0.85, edgecolor="black", linewidth=0.8, width=0.6)
+    ax.set_xticks(x2)
+    ax.set_xticklabels(names2, fontsize=10, rotation=25)
+    ax.set_ylabel("Avg Episode Length")
+    ax.set_title("Deployment \u2014 Average Episode Length", fontweight="bold")
+    ax.set_ylim(bottom=0)
+    for i, l in enumerate(lens2):
+        ax.text(i, l + ax.get_ylim()[1] * 0.01, f"{l:.1f}",
+                ha="center", va="bottom", fontsize=10, fontweight="bold",
+                color=colors2[i])
+    fig.tight_layout()
+    fig.savefig(os.path.join(deploy_dir, "deployment_ep_length.png"), bbox_inches="tight")
+    plt.close(fig)
+    print("  Saved deployment/deployment_ep_length.png")
+
+    # --- Episode length histogram ---
+    fig, ax = plt.subplots(figsize=(14, 5))
+    max_len = max(df["ep_length"].max() for df in deploy_data.values())
+    for algo in ALGOS:
+        if algo not in deploy_data:
+            continue
+        df = deploy_data[algo]
+        ax.hist(df["ep_length"], bins=30, alpha=0.5, label=ALGO_DISPLAY[algo],
+                color=ALGO_COLORS[algo], edgecolor="none")
+    ax.axvline(x=1000, color="black", linestyle="--", linewidth=1.5, label="Max steps (1000)")
+    ax.set_xlabel("Episode Length (steps)")
+    ax.set_ylabel("Count")
+    ax.set_title("Deployment \u2014 Distribution of Episode Lengths", fontweight="bold")
+    ax.legend(fontsize=9, ncol=2)
+    fig.tight_layout()
+    fig.savefig(os.path.join(deploy_dir, "deployment_length_hist.png"), bbox_inches="tight")
+    plt.close(fig)
+    print("  Saved deployment/deployment_length_hist.png")
+
+    # --- Success rate bar ---
+    fig, ax = plt.subplots(figsize=(12, 6))
+    names3, rates, colors3 = [], [], []
+    for algo in ALGOS:
+        if algo not in deploy_data:
+            continue
+        df = deploy_data[algo]
+        threshold = df["ep_length"].max() * 0.95  # near-max is success
+        rate = (df["ep_length"] >= threshold).mean() * 100
+        names3.append(ALGO_DISPLAY[algo])
+        rates.append(rate)
+        colors3.append(ALGO_COLORS[algo])
+    x3 = np.arange(len(names3))
+    ax.bar(x3, rates, color=colors3, alpha=0.85, edgecolor="black", linewidth=0.8, width=0.6)
+    ax.set_xticks(x3)
+    ax.set_xticklabels(names3, fontsize=10, rotation=25)
+    ax.set_ylabel("Success Rate (%)")
+    ax.set_title("Deployment \u2014 Success Rate", fontweight="bold")
+    ax.set_ylim(0, 105)
+    for i, r in enumerate(rates):
+        ax.text(i, r + 1, f"{r:.1f}", ha="center", va="bottom",
+                fontsize=10, fontweight="bold", color=colors3[i])
+    fig.tight_layout()
+    fig.savefig(os.path.join(deploy_dir, "deployment_success_rate.png"), bbox_inches="tight")
+    plt.close(fig)
+    print("  Saved deployment/deployment_success_rate.png")
+
+
+# --------------------------------------------------------------------------- #
+# Trajectory plots: state variables during deployment
+# --------------------------------------------------------------------------- #
+def make_trajectory_plots(out):
+    """Plot cart pos, pole angle, cart vel, pole ang vel, and action
+    during deployment episodes for each algorithm."""
+    traj_dir = os.path.join(out, "trajectories")
+    os.makedirs(traj_dir, exist_ok=True)
+
+    state_vars = [
+        ("cart_pos", "Cart Position"),
+        ("pole_angle", "Pole Angle (rad)"),
+        ("cart_vel", "Cart Velocity"),
+        ("pole_ang_vel", "Pole Angular Velocity"),
+        ("action", "Action (Force)"),
+    ]
+
+    for algo in ALGOS:
+        traj_df = load_trajectory(algo)
+        if traj_df is None or len(traj_df) == 0:
+            continue
+
+        color = ALGO_COLORS[algo]
+        name = ALGO_DISPLAY[algo]
+
+        # Pick a few representative episodes (first, middle, last)
+        episodes = sorted(traj_df["episode"].unique())
+        if len(episodes) == 0:
+            continue
+        sample_eps = []
+        for idx in [0, len(episodes) // 2, -1]:
+            if episodes[idx] not in sample_eps:
+                sample_eps.append(episodes[idx])
+
+        fig, axes = plt.subplots(len(state_vars), 1, figsize=(12, 3 * len(state_vars)),
+                                 sharex=True)
+        for ax_i, (col, label) in enumerate(state_vars):
+            if col not in traj_df.columns:
+                continue
+            for ep in sample_eps:
+                ep_data = traj_df[traj_df["episode"] == ep]
+                axes[ax_i].plot(ep_data["step"], ep_data[col],
+                                alpha=0.7, linewidth=0.8, label=f"Ep {ep}")
+            axes[ax_i].set_ylabel(label)
+            if ax_i == 0:
+                axes[ax_i].legend(fontsize=8, ncol=len(sample_eps))
+        axes[-1].set_xlabel("Step")
+        fig.suptitle(f"{name} \u2014 State Trajectories (Deployment)", fontweight="bold")
+        fig.tight_layout()
+        fig.savefig(os.path.join(traj_dir, f"{algo}_trajectory.png"), bbox_inches="tight")
+        plt.close(fig)
+
+    # Comparison: overlay all algorithms for episode 0
+    fig, axes = plt.subplots(len(state_vars), 1, figsize=(14, 3 * len(state_vars)),
+                             sharex=True)
+    plotted_any = False
+    for algo in ALGOS:
+        traj_df = load_trajectory(algo)
+        if traj_df is None or len(traj_df) == 0:
+            continue
+        ep0 = traj_df[traj_df["episode"] == 0]
+        if len(ep0) == 0:
+            continue
+        plotted_any = True
+        for ax_i, (col, label) in enumerate(state_vars):
+            if col not in ep0.columns:
+                continue
+            axes[ax_i].plot(ep0["step"], ep0[col], color=ALGO_COLORS[algo],
+                            label=ALGO_DISPLAY[algo], linewidth=1.0, alpha=0.8)
+            axes[ax_i].set_ylabel(label)
+    if plotted_any:
+        axes[0].legend(fontsize=8, ncol=4)
+        axes[-1].set_xlabel("Step")
+        fig.suptitle("All Algorithms \u2014 State Trajectories (Episode 0)", fontweight="bold")
+        fig.tight_layout()
+        fig.savefig(os.path.join(traj_dir, "comparison_trajectory.png"), bbox_inches="tight")
+        print("  Saved trajectory plots")
+    plt.close(fig)
+
+
+# --------------------------------------------------------------------------- #
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", default=os.path.join(ROOT, "figures"))
@@ -870,6 +1353,18 @@ def main():
     make_fig8(args.output)
     make_fig9(args.output)
     make_fig11_contrast(args.output, agent_a="PPO", agent_b="TD3")
+
+    # Per-algorithm plots (friend's style)
+    make_per_algo_plots(args.output)
+
+    # Comparison loss/entropy plots
+    make_comparison_losses(args.output)
+
+    # Deployment detailed plots
+    make_deployment_plots(args.output)
+
+    # State trajectory plots
+    make_trajectory_plots(args.output)
 
     print("Done.")
 
