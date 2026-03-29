@@ -142,7 +142,7 @@ def make_fig1(out):
     ax.axhline(y=950, color="gray", linestyle="--", alpha=0.3)
     ax.set_xlabel("Batch Step")
     ax.set_ylabel("Episode Return (mean +/- std)")
-    ax.set_title("Learning Efficiency: Return vs Batch Step", fontweight="bold")
+    ax.set_title("Training Return vs Batch Step", fontweight="bold")
     ax.set_xlim(0, total_steps)
     ax.set_ylim(bottom=0)
     ax.legend(loc="upper left")
@@ -170,7 +170,7 @@ def make_fig2(out):
     ax.axhline(y=950, color="gray", linestyle="--", alpha=0.3)
     ax.set_xlabel("Total Environment Steps")
     ax.set_ylabel("Episode Return (mean)")
-    ax.set_title("Sample Efficiency: Return vs Environment Steps", fontweight="bold")
+    ax.set_title("Return vs Env Steps", fontweight="bold")
     ax.set_ylim(bottom=0)
     ax.legend(loc="upper left")
     fig.tight_layout()
@@ -196,6 +196,7 @@ def make_fig3(out):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5),
                                     gridspec_kw={"width_ratios": [1, 1.3]})
 
+    # (a) Bar chart with mean +/- std
     names, means, stds, colors = [], [], [], []
     for algo in ALGOS:
         if algo not in deploy_data:
@@ -212,30 +213,42 @@ def make_fig3(out):
     ax1.set_xticks(x)
     ax1.set_xticklabels(names, fontsize=9, rotation=15)
     ax1.set_ylabel("Episode Return (mean +/- std)")
-    ax1.set_title("(a) Deployment Performance", fontweight="bold", fontsize=12)
+    ax1.set_title("(a) Mean Return", fontweight="bold", fontsize=12)
     ax1.set_ylim(bottom=0)
     for i, (m, s) in enumerate(zip(means, stds)):
         ax1.text(i, m + s + max(10, ax1.get_ylim()[1] * 0.02),
                  f"{m:.0f}", ha="center", va="bottom", fontsize=10, fontweight="bold")
 
+    # (b) Violin + strip plot (replaces hard-to-read per-episode scatter)
+    violin_data, violin_labels, violin_colors = [], [], []
     for algo in ALGOS:
         if algo not in deploy_data:
             continue
-        df = deploy_data[algo]
-        eps = df["episode"].values if "episode" in df.columns else np.arange(len(df))
-        ax2.plot(eps, df["ep_return"].values, marker="o", markersize=6,
-                 linewidth=1.5, label=ALGO_DISPLAY[algo], color=ALGO_COLORS[algo],
-                 alpha=0.8)
-    ax2.axhline(y=950, color="gray", linestyle="--", alpha=0.5)
-    ax2.set_xlabel("Evaluation Episode")
-    ax2.set_ylabel("Episode Return")
-    ax2.set_title("(b) Per-Episode Consistency", fontweight="bold", fontsize=12)
-    ax2.set_ylim(bottom=0)
-    ax2.legend(fontsize=9)
+        violin_data.append(deploy_data[algo]["ep_return"].values)
+        violin_labels.append(ALGO_DISPLAY[algo])
+        violin_colors.append(ALGO_COLORS[algo])
 
-    n_deploy = len(list(deploy_data.values())[0]) if deploy_data else 10
-    fig.suptitle(f"Deployment Performance (Deterministic Policy, {n_deploy} Episodes)",
-                 fontsize=14, fontweight="bold")
+    positions = np.arange(len(violin_data))
+    parts = ax2.violinplot(violin_data, positions=positions, showmeans=True,
+                            showmedians=True, showextrema=False)
+    for i, pc in enumerate(parts["bodies"]):
+        pc.set_facecolor(violin_colors[i])
+        pc.set_alpha(0.5)
+    parts["cmeans"].set_color("black")
+    parts["cmedians"].set_color("red")
+    parts["cmedians"].set_linestyle("--")
+    # Overlay individual points with jitter
+    for i, data in enumerate(violin_data):
+        jitter = np.random.default_rng(42).uniform(-0.15, 0.15, len(data))
+        ax2.scatter(positions[i] + jitter, data, s=8, alpha=0.4,
+                    color=violin_colors[i], edgecolors="none", zorder=3)
+    ax2.set_xticks(positions)
+    ax2.set_xticklabels(violin_labels, fontsize=9, rotation=15)
+    ax2.set_ylabel("Episode Return")
+    ax2.set_title("(b) Return Distribution", fontweight="bold", fontsize=12)
+    ax2.set_ylim(bottom=0)
+
+    fig.suptitle("Deployment Performance", fontsize=14, fontweight="bold")
     fig.tight_layout()
     fig.savefig(os.path.join(out, "fig3_deployment.png"), bbox_inches="tight")
     plt.close(fig)
@@ -343,7 +356,7 @@ def make_fig6(out):
         return
     ax.set_xlabel("Batch Step")
     ax.set_ylabel("Epsilon")
-    ax.set_title("Exploration Rate Decay (Value-Based Algorithms)", fontweight="bold")
+    ax.set_title("Exploration Decay", fontweight="bold")
     ax.set_xlim(0, total_steps)
     ax.set_ylim(bottom=0, top=1.05)
     ax.legend()
@@ -371,7 +384,7 @@ def make_fig7(out):
     ax.axhline(y=1000, color="gray", linestyle="--", alpha=0.3)
     ax.set_xlabel("Batch Step")
     ax.set_ylabel("Episode Length (steps, mean)")
-    ax.set_title("Survival Time: Episode Length vs Batch Step", fontweight="bold")
+    ax.set_title("Episode Length vs Batch Step", fontweight="bold")
     ax.set_xlim(0, total_steps)
     ax.set_ylim(bottom=0)
     ax.legend(loc="upper left")
@@ -398,14 +411,33 @@ def make_fig8(out):
         print("  [fig8] No deployment data, skipping.")
         return
 
-    fig, ax = plt.subplots(figsize=(10, 6))
-    bp = ax.boxplot(data_list, tick_labels=labels, patch_artist=True, showmeans=True,
-                    meanprops=dict(marker="D", markerfacecolor="white", markersize=6))
+    fig, ax = plt.subplots(figsize=(12, 6))
+    positions = np.arange(len(data_list))
+    # Violin
+    parts = ax.violinplot(data_list, positions=positions, showmeans=False,
+                           showmedians=False, showextrema=False)
+    for i, pc in enumerate(parts["bodies"]):
+        pc.set_facecolor(colors[i])
+        pc.set_alpha(0.35)
+    # Boxplot overlay
+    bp = ax.boxplot(data_list, positions=positions, patch_artist=True,
+                    showmeans=True, widths=0.2,
+                    meanprops=dict(marker="D", markerfacecolor="white", markersize=5),
+                    medianprops=dict(color="black", linewidth=1.5),
+                    boxprops=dict(linewidth=0.8))
     for patch, c in zip(bp["boxes"], colors):
         patch.set_facecolor(c)
         patch.set_alpha(0.7)
+    # Strip (jittered points)
+    rng = np.random.default_rng(42)
+    for i, data in enumerate(data_list):
+        jitter = rng.uniform(-0.08, 0.08, len(data))
+        ax.scatter(positions[i] + jitter, data, s=10, alpha=0.35,
+                   color=colors[i], edgecolors="none", zorder=3)
+    ax.set_xticks(positions)
+    ax.set_xticklabels(labels)
     ax.set_ylabel("Episode Return")
-    ax.set_title("Deployment Performance Distribution", fontweight="bold")
+    ax.set_title("Deployment Return Distribution", fontweight="bold")
     ax.set_ylim(bottom=0)
     fig.tight_layout()
     fig.savefig(os.path.join(out, "fig8_deployment_boxplot.png"), bbox_inches="tight")
@@ -627,7 +659,7 @@ def make_fig9(out):
         ax.set_zlabel("Action", fontsize=9)
         ax.set_title(f"{label}", fontweight="bold", fontsize=11)
         ax.view_init(elev=25, azim=-60)
-    fig_pol.suptitle("Policy Surface: Action vs (Pole Angle, Angular Velocity)\n[cart_pos=0, cart_vel=0]",
+    fig_pol.suptitle("Learned Policy Surface",
                      fontsize=14, fontweight="bold")
     fig_pol.tight_layout()
     fig_pol.savefig(os.path.join(out, "fig9_policy_surface.png"), dpi=150, bbox_inches="tight")
@@ -648,7 +680,7 @@ def make_fig9(out):
             ax.set_zlabel("V(s) / max Q", fontsize=9)
             ax.set_title(f"{label}", fontweight="bold", fontsize=11)
             ax.view_init(elev=25, azim=-60)
-        fig_val.suptitle("Value Surface: V(s) / max Q(s,a) vs (Pole Angle, Angular Velocity)\n[cart_pos=0, cart_vel=0]",
+        fig_val.suptitle("Learned Value Surface",
                          fontsize=14, fontweight="bold")
         fig_val.tight_layout()
         fig_val.savefig(os.path.join(out, "fig10_value_surface.png"), dpi=150, bbox_inches="tight")
@@ -865,6 +897,145 @@ def load_trajectory(algo):
 
 
 # --------------------------------------------------------------------------- #
+# Phase Portrait: pole_angle vs pole_angular_velocity during deployment
+# --------------------------------------------------------------------------- #
+def make_phase_portrait(out):
+    """Phase portrait (pole angle vs angular velocity) from deployment trajectories."""
+    n_algos = sum(1 for a in ALGOS if load_trajectory(a) is not None)
+    if n_algos == 0:
+        print("  [phase_portrait] No trajectory data, skipping.")
+        return
+
+    cols = min(n_algos, 4)
+    rows = (n_algos + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(5 * cols, 4.5 * rows))
+    if n_algos == 1:
+        axes = np.array([axes])
+    axes = np.atleast_2d(axes)
+
+    idx = 0
+    for algo in ALGOS:
+        traj = load_trajectory(algo)
+        if traj is None or len(traj) == 0:
+            continue
+        r, c = divmod(idx, cols)
+        ax = axes[r, c]
+
+        # Plot a few episodes as trajectories
+        episodes = sorted(traj["episode"].unique())
+        n_show = min(5, len(episodes))
+        sample_eps = [episodes[int(i * len(episodes) / n_show)] for i in range(n_show)]
+
+        for ep in sample_eps:
+            ep_data = traj[traj["episode"] == ep]
+            ax.plot(ep_data["pole_angle"], ep_data["pole_ang_vel"],
+                    alpha=0.5, linewidth=0.6, color=ALGO_COLORS[algo])
+        # Mark the origin (upright equilibrium)
+        ax.scatter([0], [0], marker="x", s=80, color="red", zorder=5, linewidths=2)
+        ax.set_xlabel("Pole Angle (rad)")
+        ax.set_ylabel("Angular Velocity")
+        ax.set_title(ALGO_DISPLAY[algo], fontweight="bold")
+        idx += 1
+
+    # Hide unused axes
+    for i in range(idx, rows * cols):
+        r, c = divmod(i, cols)
+        axes[r, c].set_visible(False)
+
+    fig.suptitle("Phase Portrait (Deployment)", fontsize=14, fontweight="bold")
+    fig.tight_layout()
+    fig.savefig(os.path.join(out, "fig_phase_portrait.png"), bbox_inches="tight")
+    plt.close(fig)
+    print("  Saved fig_phase_portrait.png")
+
+
+# --------------------------------------------------------------------------- #
+# Train vs Deploy Gap: compare last training return with deployment return
+# --------------------------------------------------------------------------- #
+def make_train_deploy_gap(out):
+    """Bar chart comparing final training return vs deployment return."""
+    names, train_means, deploy_means, colors = [], [], [], []
+    for algo in ALGOS:
+        df_train = load_csv(algo)
+        df_deploy = load_deploy(algo)
+        if df_train is None or df_deploy is None:
+            continue
+        # Use last 5% of training episodes as "final training return"
+        n_tail = max(1, len(df_train) // 20)
+        train_mean = df_train["ep_return"].tail(n_tail).mean()
+        deploy_mean = df_deploy["ep_return"].mean()
+        names.append(ALGO_DISPLAY[algo])
+        train_means.append(train_mean)
+        deploy_means.append(deploy_mean)
+        colors.append(ALGO_COLORS[algo])
+
+    if not names:
+        print("  [train_deploy_gap] No data, skipping.")
+        return
+
+    fig, ax = plt.subplots(figsize=(12, 5))
+    x = np.arange(len(names))
+    w = 0.35
+    ax.bar(x - w / 2, train_means, w, label="Training (last 5%)",
+           color=colors, alpha=0.6, edgecolor="black", linewidth=0.8)
+    ax.bar(x + w / 2, deploy_means, w, label="Deployment",
+           color=colors, alpha=1.0, edgecolor="black", linewidth=0.8)
+    ax.set_xticks(x)
+    ax.set_xticklabels(names, fontsize=10, rotation=15)
+    ax.set_ylabel("Mean Episode Return")
+    ax.set_title("Training vs Deployment Return", fontweight="bold")
+    ax.set_ylim(bottom=0)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(os.path.join(out, "fig_train_deploy_gap.png"), bbox_inches="tight")
+    plt.close(fig)
+    print("  Saved fig_train_deploy_gap.png")
+
+
+# --------------------------------------------------------------------------- #
+# Action Histogram: distribution of actions during deployment
+# --------------------------------------------------------------------------- #
+def make_action_histogram(out):
+    """Histogram of actions taken during deployment for each algorithm."""
+    n_algos = sum(1 for a in ALGOS if load_trajectory(a) is not None)
+    if n_algos == 0:
+        print("  [action_histogram] No trajectory data, skipping.")
+        return
+
+    cols = min(n_algos, 4)
+    rows = (n_algos + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(5 * cols, 4 * rows))
+    if n_algos == 1:
+        axes = np.array([axes])
+    axes = np.atleast_2d(axes)
+
+    idx = 0
+    for algo in ALGOS:
+        traj = load_trajectory(algo)
+        if traj is None or "action" not in traj.columns or len(traj) == 0:
+            continue
+        r, c = divmod(idx, cols)
+        ax = axes[r, c]
+        ax.hist(traj["action"].values, bins=50, color=ALGO_COLORS[algo],
+                alpha=0.8, edgecolor="none", density=True)
+        ax.axvline(x=0, color="black", linestyle="--", linewidth=0.8, alpha=0.5)
+        ax.set_xlabel("Action (Force)")
+        ax.set_ylabel("Density")
+        ax.set_title(ALGO_DISPLAY[algo], fontweight="bold")
+        idx += 1
+
+    for i in range(idx, rows * cols):
+        r, c = divmod(i, cols)
+        axes[r, c].set_visible(False)
+
+    fig.suptitle("Action Distribution (Deployment)", fontsize=14, fontweight="bold")
+    fig.tight_layout()
+    fig.savefig(os.path.join(out, "fig_action_histogram.png"), bbox_inches="tight")
+    plt.close(fig)
+    print("  Saved fig_action_histogram.png")
+
+
+# --------------------------------------------------------------------------- #
 # Per-algorithm plots (friend's style)
 # --------------------------------------------------------------------------- #
 def make_per_algo_plots(out):
@@ -891,7 +1062,7 @@ def make_per_algo_plots(out):
         ax.plot(df["episode"], smoothed, color=color, label=f"Smoothed (w={smooth_w})")
         ax.set_xlabel("Episode")
         ax.set_ylabel("Cumulative Reward")
-        ax.set_title(f"{name} \u2014 Learning Curve (Reward)", fontweight="bold")
+        ax.set_title(f"{name} \u2014 Training Return", fontweight="bold")
         ax.legend()
         fig.tight_layout()
         fig.savefig(os.path.join(algo_dir, "learning_curve.png"), bbox_inches="tight")
@@ -907,7 +1078,7 @@ def make_per_algo_plots(out):
         ax.axhline(y=0, color="gray", linestyle="--", alpha=0.3)
         ax.set_xlabel("Episode")
         ax.set_ylabel("Cumulative Reward")
-        ax.set_title(f"{name} \u2014 Reward Stability (Mean \u00b1 Std)", fontweight="bold")
+        ax.set_title(f"{name} \u2014 Return Stability", fontweight="bold")
         ax.legend()
         fig.tight_layout()
         fig.savefig(os.path.join(algo_dir, "reward_with_std.png"), bbox_inches="tight")
@@ -921,7 +1092,7 @@ def make_per_algo_plots(out):
         ax.set_xlabel("Total Env Steps")
         ax.set_ylabel("Cumulative Reward")
         ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.0f}k"))
-        ax.set_title(f"{name} \u2014 Reward vs Environment Steps", fontweight="bold")
+        ax.set_title(f"{name} \u2014 Return vs Env Steps", fontweight="bold")
         ax.legend()
         fig.tight_layout()
         fig.savefig(os.path.join(algo_dir, "steps_vs_reward.png"), bbox_inches="tight")
@@ -1055,7 +1226,7 @@ def make_comparison_losses(out):
         ax_al.axhline(y=0, color="gray", linestyle="--", alpha=0.3)
         ax_al.set_xlabel("Update step")
         ax_al.set_ylabel("Actor Loss")
-        ax_al.set_title("Neural Algorithms \u2014 Actor Loss (Smoothed)", fontweight="bold")
+        ax_al.set_title("Actor Loss Comparison", fontweight="bold")
         ax_al.legend()
         fig_al.tight_layout()
         fig_al.savefig(os.path.join(comp_dir, "comparison_actor_loss.png"), bbox_inches="tight")
@@ -1066,7 +1237,7 @@ def make_comparison_losses(out):
         ax_cl.axhline(y=0, color="gray", linestyle="--", alpha=0.3)
         ax_cl.set_xlabel("Update step")
         ax_cl.set_ylabel("Critic Loss")
-        ax_cl.set_title("All Algorithms \u2014 Critic Loss (Smoothed)", fontweight="bold")
+        ax_cl.set_title("Critic Loss Comparison", fontweight="bold")
         ax_cl.legend()
         fig_cl.tight_layout()
         fig_cl.savefig(os.path.join(comp_dir, "comparison_critic_loss.png"), bbox_inches="tight")
@@ -1100,7 +1271,7 @@ def make_comparison_losses(out):
 
     ax_r.set_xlabel("Episode")
     ax_r.set_ylabel("Cumulative Reward")
-    ax_r.set_title("All Algorithms \u2014 Cumulative Reward (Smoothed)", fontweight="bold")
+    ax_r.set_title("Training Return Comparison", fontweight="bold")
     ax_r.legend()
     fig_r.tight_layout()
     fig_r.savefig(os.path.join(comp_dir, "comparison_reward.png"), bbox_inches="tight")
@@ -1109,7 +1280,7 @@ def make_comparison_losses(out):
 
     ax_el.set_xlabel("Episode")
     ax_el.set_ylabel("Episode Length")
-    ax_el.set_title("All Algorithms \u2014 Episode Length (Smoothed)", fontweight="bold")
+    ax_el.set_title("Episode Length Comparison", fontweight="bold")
     ax_el.legend()
     fig_el.tight_layout()
     fig_el.savefig(os.path.join(comp_dir, "comparison_ep_length.png"), bbox_inches="tight")
@@ -1151,7 +1322,7 @@ def make_deployment_plots(out):
     ax.set_xticks(x)
     ax.set_xticklabels(names, fontsize=10, rotation=25)
     ax.set_ylabel("Avg Reward")
-    ax.set_title("Deployment \u2014 Average Reward", fontweight="bold")
+    ax.set_title("Deployment Mean Return", fontweight="bold")
     ax.set_ylim(bottom=0)
     for i, m in enumerate(means):
         ax.text(i, m + ax.get_ylim()[1] * 0.01, f"{m:.1f}",
@@ -1173,7 +1344,7 @@ def make_deployment_plots(out):
                 alpha=0.8)
     ax.set_xlabel("Deployment Episode")
     ax.set_ylabel("Cumulative Reward")
-    ax.set_title("Deployment \u2014 Per-Episode Reward (Greedy Policy)", fontweight="bold")
+    ax.set_title("Deployment Per-Episode Return", fontweight="bold")
     ax.legend(fontsize=9, ncol=2)
     fig.tight_layout()
     fig.savefig(os.path.join(deploy_dir, "deployment_reward_per_ep.png"), bbox_inches="tight")
@@ -1195,7 +1366,7 @@ def make_deployment_plots(out):
     ax.set_xticks(x2)
     ax.set_xticklabels(names2, fontsize=10, rotation=25)
     ax.set_ylabel("Avg Episode Length")
-    ax.set_title("Deployment \u2014 Average Episode Length", fontweight="bold")
+    ax.set_title("Deployment Episode Length", fontweight="bold")
     ax.set_ylim(bottom=0)
     for i, l in enumerate(lens2):
         ax.text(i, l + ax.get_ylim()[1] * 0.01, f"{l:.1f}",
@@ -1218,39 +1389,13 @@ def make_deployment_plots(out):
     ax.axvline(x=1000, color="black", linestyle="--", linewidth=1.5, label="Max steps (1000)")
     ax.set_xlabel("Episode Length (steps)")
     ax.set_ylabel("Count")
-    ax.set_title("Deployment \u2014 Distribution of Episode Lengths", fontweight="bold")
+    ax.set_title("Episode Length Distribution", fontweight="bold")
     ax.legend(fontsize=9, ncol=2)
     fig.tight_layout()
     fig.savefig(os.path.join(deploy_dir, "deployment_length_hist.png"), bbox_inches="tight")
     plt.close(fig)
     print("  Saved deployment/deployment_length_hist.png")
 
-    # --- Success rate bar ---
-    fig, ax = plt.subplots(figsize=(12, 6))
-    names3, rates, colors3 = [], [], []
-    for algo in ALGOS:
-        if algo not in deploy_data:
-            continue
-        df = deploy_data[algo]
-        threshold = df["ep_length"].max() * 0.95  # near-max is success
-        rate = (df["ep_length"] >= threshold).mean() * 100
-        names3.append(ALGO_DISPLAY[algo])
-        rates.append(rate)
-        colors3.append(ALGO_COLORS[algo])
-    x3 = np.arange(len(names3))
-    ax.bar(x3, rates, color=colors3, alpha=0.85, edgecolor="black", linewidth=0.8, width=0.6)
-    ax.set_xticks(x3)
-    ax.set_xticklabels(names3, fontsize=10, rotation=25)
-    ax.set_ylabel("Success Rate (%)")
-    ax.set_title("Deployment \u2014 Success Rate", fontweight="bold")
-    ax.set_ylim(0, 105)
-    for i, r in enumerate(rates):
-        ax.text(i, r + 1, f"{r:.1f}", ha="center", va="bottom",
-                fontsize=10, fontweight="bold", color=colors3[i])
-    fig.tight_layout()
-    fig.savefig(os.path.join(deploy_dir, "deployment_success_rate.png"), bbox_inches="tight")
-    plt.close(fig)
-    print("  Saved deployment/deployment_success_rate.png")
 
 
 # --------------------------------------------------------------------------- #
@@ -1346,15 +1491,18 @@ def main():
     make_fig1(args.output)
     make_fig2(args.output)
     make_fig3(args.output)
-    make_fig4(args.output)
-    make_fig5(args.output)
     make_fig6(args.output)
     make_fig7(args.output)
     make_fig8(args.output)
     make_fig9(args.output)
     make_fig11_contrast(args.output, agent_a="PPO", agent_b="TD3")
 
-    # Per-algorithm plots (friend's style)
+    # New analysis plots
+    make_phase_portrait(args.output)
+    make_train_deploy_gap(args.output)
+    make_action_histogram(args.output)
+
+    # Per-algorithm plots
     make_per_algo_plots(args.output)
 
     # Comparison loss/entropy plots

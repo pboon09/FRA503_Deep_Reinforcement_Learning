@@ -568,9 +568,11 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                 for i in range(num_envs):
                     agent.store_transition(obs[i], raw[i], float(rew_cpu[i]),
                                            next_obs[i], float(done_cpu[i]))
-                # SAC: multiple gradient steps per batch step (UTD=4)
+                # SAC: scale gradient steps to compensate for vectorized data collection
+                # effective UTD = gradient_steps / num_envs  (Raffin, 2024)
+                # With 256 envs, 64 steps gives effective UTD ≈ 0.25
                 if step >= getattr(agent, 'learning_starts', 0):
-                    for _ in range(4):
+                    for _ in range(64):
                         loss_info = agent.update_policy()
                         if loss_writer is not None and loss_info:
                             loss_writer.writerow({
@@ -589,9 +591,10 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                 for i in range(num_envs):
                     agent.store_transition(obs[i], raw[i], float(rew_cpu[i]),
                                            next_obs[i], float(done_cpu[i]))
-                # TD3: multiple gradient steps per batch step (UTD=4)
+                # TD3: scale gradient steps to compensate for vectorized data collection
+                # effective UTD = gradient_steps / num_envs  (Raffin, 2024)
                 if step >= agent.learning_starts:
-                    for _ in range(4):
+                    for _ in range(64):
                         loss_info = agent.update_policy()
                         if loss_writer is not None and loss_info:
                             loss_writer.writerow({
