@@ -344,6 +344,7 @@ class AC(OnPolicyAlgorithm):
         """
         # ========= put your code here ========= #
         advantages = td_errors.detach()
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         actor_loss = -(log_prob_actions * advantages).mean()
         critic_loss = td_errors.pow(2).mean()
         # Entropy bonus: subtract entropy from loss so maximising entropy reduces total loss
