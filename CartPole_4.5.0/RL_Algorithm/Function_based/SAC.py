@@ -318,16 +318,16 @@ class SAC(OffPolicyAlgorithm):
         return states, actions, rewards, next_states, dones
         # ====================================== #
 
-    def update_policy(self, update_target: bool = True):
+    def update_policy(self, update_target: bool = True, update_alpha: bool = True):
         """
-        Perform one update step for critics, actor, and temperature.
+        Perform one update step for critics, actor, and (optionally) temperature.
 
         Args:
             update_target (bool): Whether to Polyak-update the critic target network.
-                Set False when calling in a tight inner loop (e.g. 64 gradient steps
-                per env step) and call update_target_networks() once externally after
-                the loop — otherwise tau is applied 64× per env step, making the
-                target track the current network ~55× faster than intended.
+            update_alpha (bool): Whether to update the temperature parameter α.
+                Set both False when calling in a tight inner loop (e.g. 64 gradient
+                steps per env step) and call update_target_networks() and
+                update_alpha_once() externally after the loop.
 
         Returns:
             dict | None: Loss dict, or None if buffer not ready.
@@ -363,14 +363,13 @@ class SAC(OffPolicyAlgorithm):
         self.actor_optimizer.step()
 
         # --- Alpha update ---
-        if self.auto_alpha:
+        if self.auto_alpha and update_alpha:
             alpha_loss = -(self.log_alpha * (new_log_prob.detach() + self.target_entropy)).mean()
             self.alpha_optimizer.zero_grad()
             alpha_loss.backward()
             self.alpha_optimizer.step()
+            self.alpha = self.log_alpha.exp().item()
         # ====================================== #
-
-        self.alpha = self.log_alpha.exp().item()
 
         if update_target:
             self.update_target_networks()
@@ -381,6 +380,24 @@ class SAC(OffPolicyAlgorithm):
             "entropy": -new_log_prob.mean().item(),
             "alpha": self.alpha,
         }
+
+    def update_alpha_once(self, batch_size: int = None):
+        """
+        Single α update using a fresh sample — call once per env step.
+        """
+        if not self.auto_alpha:
+            return
+        sample = self.generate_sample()
+        if sample is None:
+            return
+        states = sample[0]
+        with torch.no_grad():
+            _, log_prob = self.actor.sample(states)
+        alpha_loss = -(self.log_alpha * (log_prob.detach() + self.target_entropy)).mean()
+        self.alpha_optimizer.zero_grad()
+        alpha_loss.backward()
+        self.alpha_optimizer.step()
+        self.alpha = self.log_alpha.exp().item()
 
     def update_target_networks(self):
         """

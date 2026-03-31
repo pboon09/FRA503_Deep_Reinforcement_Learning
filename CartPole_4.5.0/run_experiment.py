@@ -555,7 +555,7 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                 # tau=0.005 is applied once, not 64×, keeping the target stable.
                 if step >= getattr(agent, 'learning_starts', 0):
                     for _ in range(64):
-                        loss_info = agent.update_policy(update_target=False)
+                        loss_info = agent.update_policy(update_target=False, update_alpha=False)
                         if loss_writer is not None and loss_info:
                             loss_writer.writerow({
                                 "update_step": loss_update_step,
@@ -566,6 +566,7 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                             })
                             loss_update_step += 1
                     agent.update_target_networks()  # once per env step, not 64×
+                    agent.update_alpha_once()        # once per env step, not 64×
 
             elif algo_name == "TD3":
                 a_min, a_max = agent.action_range
