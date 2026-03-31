@@ -531,9 +531,12 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                         agent.policy._update_distribution(ep_obs)
                         lp = agent.policy.get_actions_log_prob(ep_act)
                         vals = agent.policy.evaluate(ep_obs).squeeze(-1)
-                        returns = agent.compute_returns(
-                            torch.tensor(env_rewards[i], device=device))
-                        al, cl = agent.calculate_loss(lp, vals, returns)
+                        rewards_t = torch.tensor(env_rewards[i], device=device)
+                        next_vals = torch.cat([vals[1:].detach(), torch.zeros(1, device=device)])
+                        dones_t = torch.zeros(len(env_rewards[i]), device=device)
+                        dones_t[-1] = 1.0
+                        td_errors = agent.compute_td_errors(rewards_t, vals, next_vals, dones_t)
+                        al, cl = agent.calculate_loss(lp, vals, td_errors)
                         loss = (al + agent.value_loss_coef * cl) / update_every
                         loss.backward()
                         ac_actor_accum += al.item()
