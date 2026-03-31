@@ -400,13 +400,13 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
 
     # --- All other algorithms: single continuous loop ---
     else:
-        # Per-env storage for MC algorithms (REINFORCE, AC)
-        if algo_name in ("MC_REINFORCE", "AC"):
+        # Per-env storage for MC_REINFORCE only
+        if algo_name == "MC_REINFORCE":
             env_obs = [[] for _ in range(num_envs)]
             env_actions = [[] for _ in range(num_envs)]
             env_rewards = [[] for _ in range(num_envs)]
             num_updates = 0
-            update_every = 2  # very frequent updates for short episodes
+            update_every = 2
             agent.optimizer.zero_grad()
 
         loss_update_step = 0
@@ -513,55 +513,32 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                     num_updates = 0
 
             elif algo_name == "AC":
-                action, _, _ = extra
-                done_cpu = done.cpu().numpy()
-                rew_cpu = reward.cpu().numpy()
-                ac_actor_accum = 0.0
-                ac_critic_accum = 0.0
-                ac_entropy_accum = 0.0
-                ac_count = 0
-                for i in range(num_envs):
-                    env_obs[i].append(obs[i].detach())
-                    env_actions[i].append(action[i].detach())
-                    env_rewards[i].append(float(rew_cpu[i]))
-                    if done_cpu[i] and len(env_rewards[i]) > 1:
-                        # Recompute log_probs & values with fresh graph
-                        ep_obs = torch.stack(env_obs[i])
-                        ep_act = torch.stack(env_actions[i])
-                        agent.policy._update_distribution(ep_obs)
-                        lp = agent.policy.get_actions_log_prob(ep_act)
-                        vals = agent.policy.evaluate(ep_obs).squeeze(-1)
-                        rewards_t = torch.tensor(env_rewards[i], device=device)
-                        next_vals = torch.cat([vals[1:].detach(), torch.zeros(1, device=device)])
-                        dones_t = torch.zeros(len(env_rewards[i]), device=device)
-                        dones_t[-1] = 1.0
-                        td_errors = agent.compute_td_errors(rewards_t, vals, next_vals, dones_t)
-                        al, cl = agent.calculate_loss(lp, vals, td_errors)
-                        loss = (al + agent.value_loss_coef * cl) / update_every
-                        loss.backward()
-                        ac_actor_accum += al.item()
-                        ac_critic_accum += cl.item()
-                        if agent.policy.distribution is not None:
-                            ac_entropy_accum += agent.policy.entropy.mean().item()
-                        ac_count += 1
-                        num_updates += 1
-                    if done_cpu[i]:
-                        env_obs[i] = []
-                        env_actions[i] = []
-                        env_rewards[i] = []
-                if num_updates >= update_every:
-                    torch.nn.utils.clip_grad_norm_(agent.policy.parameters(), agent.max_grad_norm)
-                    agent.optimizer.step()
-                    agent.optimizer.zero_grad()
-                    if loss_writer is not None and ac_count > 0:
-                        loss_writer.writerow({
-                            "update_step": loss_update_step,
-                            "actor_loss": ac_actor_accum / ac_count,
-                            "critic_loss": ac_critic_accum / ac_count,
-                            "entropy": ac_entropy_accum / ac_count,
-                        })
-                        loss_update_step += 1
-                    num_updates = 0
+                # Online per-step TD update — S&B Ch 13.5
+                # log_prob and value were computed with gradient in _select_action_batch
+                _, log_prob, value = extra
+                value = value.squeeze(-1)  # (N,)
+                with torch.no_grad():
+                    next_value = agent.policy.evaluate(next_obs).squeeze(-1)  # (N,)
+                done_float = done.float()
+                # δ_t = r_t + γ·V(s_{t+1})·(1−done) − V(s_t)
+                delta = reward + agent.discount_factor * next_value * (1.0 - done_float) - value
+                actor_loss = -(log_prob * delta.detach()).mean()
+                if agent.policy.distribution is not None:
+                    actor_loss = actor_loss - agent.entropy_coef * agent.policy.entropy.mean()
+                critic_loss = delta.pow(2).mean()
+                total_loss = actor_loss + agent.value_loss_coef * critic_loss
+                agent.optimizer.zero_grad()
+                total_loss.backward()
+                torch.nn.utils.clip_grad_norm_(agent.policy.parameters(), agent.max_grad_norm)
+                agent.optimizer.step()
+                if loss_writer is not None:
+                    loss_writer.writerow({
+                        "update_step": loss_update_step,
+                        "actor_loss": actor_loss.item(),
+                        "critic_loss": critic_loss.item(),
+                        "entropy": agent.policy.entropy.mean().item() if agent.policy.distribution is not None else "",
+                    })
+                    loss_update_step += 1
 
             elif algo_name == "SAC":
                 a_min, a_max = agent.action_range
@@ -633,14 +610,11 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
 
         pbar.close()
 
-        # Final gradient step for MC algorithms (flush accumulated grads)
-        if algo_name in ("MC_REINFORCE", "AC") and num_updates > 0:
-            if algo_name == "MC_REINFORCE":
-                torch.nn.utils.clip_grad_norm_(agent.policy_net.parameters(), 0.5)
-                if hasattr(agent, 'value_net'):
-                    torch.nn.utils.clip_grad_norm_(agent.value_net.parameters(), 0.5)
-            elif algo_name == "AC":
-                torch.nn.utils.clip_grad_norm_(agent.policy.parameters(), agent.max_grad_norm)
+        # Final gradient step for MC_REINFORCE (flush accumulated grads)
+        if algo_name == "MC_REINFORCE" and num_updates > 0:
+            torch.nn.utils.clip_grad_norm_(agent.policy_net.parameters(), 0.5)
+            if hasattr(agent, 'value_net'):
+                torch.nn.utils.clip_grad_norm_(agent.value_net.parameters(), 0.5)
             agent.optimizer.step()
             agent.optimizer.zero_grad()
 

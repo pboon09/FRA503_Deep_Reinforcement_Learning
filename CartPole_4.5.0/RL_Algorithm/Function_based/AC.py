@@ -3,7 +3,7 @@ import os
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+
 import torch.optim as optim
 from torch.distributions.normal import Normal
 from torch.distributions.categorical import Categorical
@@ -310,9 +310,6 @@ class AC(OnPolicyAlgorithm):
         """
         Compute one-step TD errors δ_t = r_t + γ·V(s_{t+1})·(1−done) − V(s_t).
 
-        This is the textbook actor-critic advantage (Sutton & Barto Ch. 13.5,
-        Lecture 8) that distinguishes AC from REINFORCE-with-baseline.
-
         Args:
             rewards (Tensor): shape (T,).
             values (Tensor): shape (T,).
@@ -329,10 +326,9 @@ class AC(OnPolicyAlgorithm):
 
     def calculate_loss(self, log_prob_actions, values, td_errors):
         """
-        Compute actor and critic losses using TD error as advantage.
+        Compute actor and critic losses using one-step TD error as advantage.
 
-        The critic is trained to minimise the squared TD error, and the
-        actor uses δ_t as the advantage signal (Sutton & Barto Ch. 13.5).
+        δ_t = r_t + γ·V(s_{t+1})·(1−done) − V(s_t)  (S&B Ch 13.5)
 
         Args:
             log_prob_actions (Tensor): shape (T,).
@@ -343,11 +339,8 @@ class AC(OnPolicyAlgorithm):
             Tuple[Tensor, Tensor]: (actor_loss, critic_loss)
         """
         # ========= put your code here ========= #
-        advantages = td_errors.detach()
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-        actor_loss = -(log_prob_actions * advantages).mean()
+        actor_loss = -(log_prob_actions * td_errors.detach()).mean()
         critic_loss = td_errors.pow(2).mean()
-        # Entropy bonus: subtract entropy from loss so maximising entropy reduces total loss
         if self.policy.distribution is not None:
             entropy = self.policy.entropy.mean()
         else:
@@ -408,29 +401,21 @@ class AC(OnPolicyAlgorithm):
             loss = self.update_policy(log_prob_actions, values.squeeze(), td_errors)
             return episode_return, loss, timestep
 
-        # ----- Parallel-env path ----- #
+        # ----- Parallel-env path: online per-step TD update (S&B Ch 13.5) ----- #
         obs, _ = env.reset()  # (num_agents, obs_dim)
         if isinstance(obs, dict): obs = obs["policy"]
         obs = obs.to(self.device)
 
-        # Per-env episode storage
-        env_log_probs    = [[] for _ in range(num_agents)]
-        env_values       = [[] for _ in range(num_agents)]
-        env_next_values  = [[] for _ in range(num_agents)]
-        env_rewards_list = [[] for _ in range(num_agents)]
-        env_dones_list   = [[] for _ in range(num_agents)]
         completed_returns = []
         completed_lengths = []
         total_loss = 0.0
-        num_updates = 0
 
         for step in range(max_steps):
             obs_tensor = obs.to(self.device)
-            action   = self.policy.act(obs_tensor)               # (N, action_dim) or (N, 1)
-            value    = self.policy.evaluate(obs_tensor)           # (N, 1)
-            log_prob = self.policy.get_actions_log_prob(action)   # (N,)
+            action   = self.policy.act(obs_tensor)
+            value    = self.policy.evaluate(obs_tensor).squeeze(-1)
+            log_prob = self.policy.get_actions_log_prob(action)
 
-            # Prepare action for the environment
             if self.action_type == "continuous":
                 action_env = action.clamp(self.action_range[0], self.action_range[1])
             else:
@@ -438,58 +423,33 @@ class AC(OnPolicyAlgorithm):
 
             next_obs, reward, terminated, truncated, _ = env.step(action_env)
             if isinstance(next_obs, dict): next_obs = next_obs["policy"]
-            dones = terminated | truncated  # (N,)
+            dones = (terminated | truncated).float()
 
-            # V(s_{t+1}) for TD error (bootstrapping)
             with torch.no_grad():
-                next_value = self.policy.evaluate(next_obs)  # (N, 1)
+                next_value = self.policy.evaluate(next_obs).squeeze(-1)
 
-            # Batch CPU transfer once
-            done_cpu = dones.cpu().numpy()
+            # δ_t = r_t + γ·V(s_{t+1})·(1−done) − V(s_t)
+            delta = reward + self.discount_factor * next_value * (1.0 - dones) - value
+            actor_loss, critic_loss = self.calculate_loss(log_prob, value, delta)
+            step_loss = actor_loss + self.value_loss_coef * critic_loss
 
-            # Store per-env data and handle episode boundaries
-            for i in range(num_agents):
-                env_log_probs[i].append(log_prob[i])
-                env_values[i].append(value[i].squeeze())
-                env_next_values[i].append(next_value[i].squeeze())
-                env_rewards_list[i].append(reward[i])
-                env_dones_list[i].append(dones[i].float())
-
-                if done_cpu[i]:
-                    # Episode completed for env i — compute TD errors
-                    if len(env_rewards_list[i]) > 1:
-                        rewards_t     = torch.stack(env_rewards_list[i])
-                        vals          = torch.stack(env_values[i])
-                        next_vals     = torch.stack(env_next_values[i])
-                        dones_t       = torch.stack(env_dones_list[i])
-                        lp            = torch.stack(env_log_probs[i])
-                        td_errors     = self.compute_td_errors(rewards_t, vals, next_vals, dones_t)
-                        actor_loss, critic_loss = self.calculate_loss(lp, vals, td_errors)
-                        loss = actor_loss + self.value_loss_coef * critic_loss
-                        total_loss += loss
-                        num_updates += 1
-                        completed_returns.append(rewards_t.sum().item())
-                        completed_lengths.append(len(env_rewards_list[i]))
-                    # Reset storage for this env (Isaac Lab auto-resets)
-                    env_log_probs[i]    = []
-                    env_values[i]       = []
-                    env_next_values[i]  = []
-                    env_rewards_list[i] = []
-                    env_dones_list[i]   = []
-
-            obs = next_obs
-
-        # Single averaged gradient update
-        if num_updates > 0:
-            avg_loss = total_loss / num_updates
             self.optimizer.zero_grad()
-            avg_loss.backward()
+            step_loss.backward()
             nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
             self.optimizer.step()
 
+            total_loss += step_loss.item()
+
+            if dones.any():
+                done_returns = reward[dones.bool()]
+                completed_returns.extend(done_returns.cpu().tolist())
+                completed_lengths.extend([1] * int(dones.sum().item()))
+
+            obs = next_obs
+
         avg_return = np.mean(completed_returns) if completed_returns else 0.0
         avg_length = int(np.mean(completed_lengths)) if completed_lengths else max_steps
-        loss_val   = avg_loss.item() if num_updates > 0 else 0.0
+        loss_val   = total_loss / max_steps
         return avg_return, loss_val, avg_length
         # ====================================== #
 
