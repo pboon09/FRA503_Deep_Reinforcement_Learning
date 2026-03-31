@@ -228,11 +228,14 @@ class AC(OnPolicyAlgorithm):
         """
         Run one full episode and collect the trajectory as lists.
 
+        Collects next-state values and done flags so that one-step TD errors
+        δ_t = r_t + γ·V(s_{t+1})·(1−done) − V(s_t) can be computed.
+
         Args:
             env: The environment.
 
         Returns:
-            Tuple: (episode_return, log_prob_actions, values, rewards, timestep)
+            Tuple: (episode_return, log_prob_actions, values, next_values, rewards, dones, timestep)
         """
         # ========= put your code here ========= #
         obs, _ = env.reset()
@@ -243,7 +246,9 @@ class AC(OnPolicyAlgorithm):
 
         log_prob_actions = []
         values = []
+        next_values = []
         rewards = []
+        dones_list = []
         episode_return = 0.0
         timestep = 0
         done = False
@@ -263,70 +268,84 @@ class AC(OnPolicyAlgorithm):
             next_obs, reward, terminated, truncated, _ = env.step(action_env)
             done = terminated or truncated if isinstance(terminated, bool) else (terminated | truncated).any()
 
+            if not isinstance(next_obs, torch.Tensor):
+                next_obs = torch.tensor(next_obs, dtype=torch.float32, device=self.device)
+            else:
+                next_obs = next_obs.to(self.device)
+
+            # V(s_{t+1}) for TD error computation
+            with torch.no_grad():
+                next_value = self.policy.evaluate(next_obs)
+
             log_prob_actions.append(log_prob)
             values.append(value.squeeze(-1))
+            next_values.append(next_value.squeeze(-1))
             if isinstance(reward, torch.Tensor):
                 reward_val = reward.item() if reward.numel() == 1 else reward.sum().item()
                 rewards.append(reward.view(-1))
             else:
                 reward_val = float(reward)
                 rewards.append(torch.tensor([reward_val], dtype=torch.float32, device=self.device))
+            dones_list.append(torch.tensor([1.0 if done else 0.0], device=self.device))
             episode_return += reward_val
             timestep += 1
 
-            if not isinstance(next_obs, torch.Tensor):
-                obs = torch.tensor(next_obs, dtype=torch.float32, device=self.device)
-            else:
-                obs = next_obs.to(self.device)
+            obs = next_obs
 
         log_prob_actions = torch.cat(log_prob_actions)
         values = torch.cat(values)
+        next_values = torch.cat(next_values)
         rewards = torch.cat(rewards)
+        dones_tensor = torch.cat(dones_list)
 
-        return episode_return, log_prob_actions, values, rewards, timestep
+        return episode_return, log_prob_actions, values, next_values, rewards, dones_tensor, timestep
         # ====================================== #
 
     # ------------------------------------------------------------------ #
     # Return & Loss                                                        #
     # ------------------------------------------------------------------ #
 
-    def compute_returns(self, rewards: torch.Tensor) -> torch.Tensor:
+    def compute_td_errors(self, rewards: torch.Tensor, values: torch.Tensor,
+                           next_values: torch.Tensor, dones: torch.Tensor) -> torch.Tensor:
         """
-        Compute discounted Monte-Carlo returns G_t = r_t + γ·r_{t+1} + ...
+        Compute one-step TD errors δ_t = r_t + γ·V(s_{t+1})·(1−done) − V(s_t).
+
+        This is the textbook actor-critic advantage (Sutton & Barto Ch. 13.5,
+        Lecture 8) that distinguishes AC from REINFORCE-with-baseline.
 
         Args:
             rewards (Tensor): shape (T,).
+            values (Tensor): shape (T,).
+            next_values (Tensor): shape (T,). V(s_{t+1}) for each step.
+            dones (Tensor): shape (T,). 1.0 if episode ended at step t.
 
         Returns:
-            Tensor: Normalised return tensor of shape (T,).
+            Tensor: TD errors of shape (T,).
         """
         # ========= put your code here ========= #
-        T = len(rewards)
-        returns = torch.zeros(T, device=rewards.device)
-        G = 0.0
-        for t in reversed(range(T)):
-            G = rewards[t].item() + self.discount_factor * G
-            returns[t] = G
-        returns = (returns - returns.mean()) / (returns.std() + 1e-8)
-        return returns
+        td_errors = rewards + self.discount_factor * next_values * (1.0 - dones) - values
+        return td_errors
         # ====================================== #
 
-    def calculate_loss(self, log_prob_actions, values, returns):
+    def calculate_loss(self, log_prob_actions, values, td_errors):
         """
-        Compute actor and critic losses.
+        Compute actor and critic losses using TD error as advantage.
+
+        The critic is trained to minimise the squared TD error, and the
+        actor uses δ_t as the advantage signal (Sutton & Barto Ch. 13.5).
 
         Args:
             log_prob_actions (Tensor): shape (T,).
             values (Tensor): shape (T,).
-            returns (Tensor): shape (T,).
+            td_errors (Tensor): shape (T,).
 
         Returns:
             Tuple[Tensor, Tensor]: (actor_loss, critic_loss)
         """
         # ========= put your code here ========= #
-        advantages = returns - values.detach()
+        advantages = td_errors.detach()
         actor_loss = -(log_prob_actions * advantages).mean()
-        critic_loss = F.mse_loss(values, returns)
+        critic_loss = td_errors.pow(2).mean()
         # Entropy bonus: subtract entropy from loss so maximising entropy reduces total loss
         if self.policy.distribution is not None:
             entropy = self.policy.entropy.mean()
@@ -336,7 +355,7 @@ class AC(OnPolicyAlgorithm):
         return actor_loss, critic_loss
         # ====================================== #
 
-    def update_policy(self, log_prob_actions, values, returns) -> float:
+    def update_policy(self, log_prob_actions, values, td_errors) -> float:
         """
         Backpropagate and update.
 
@@ -344,7 +363,7 @@ class AC(OnPolicyAlgorithm):
             float: Total combined loss.
         """
         # ========= put your code here ========= #
-        actor_loss, critic_loss = self.calculate_loss(log_prob_actions, values, returns)
+        actor_loss, critic_loss = self.calculate_loss(log_prob_actions, values, td_errors)
         total_loss = actor_loss + self.value_loss_coef * critic_loss
         self.optimizer.zero_grad()
         total_loss.backward()
@@ -383,9 +402,9 @@ class AC(OnPolicyAlgorithm):
         # ========= put your code here ========= #
         # ----- Single-env path (original behaviour) ----- #
         if num_agents == 1:
-            episode_return, log_prob_actions, values, rewards, timestep = self.generate_trajectory(env)
-            returns = self.compute_returns(rewards)
-            loss = self.update_policy(log_prob_actions, values, returns)
+            episode_return, log_prob_actions, values, next_values, rewards, dones_t, timestep = self.generate_trajectory(env)
+            td_errors = self.compute_td_errors(rewards, values.squeeze(), next_values.squeeze(), dones_t)
+            loss = self.update_policy(log_prob_actions, values.squeeze(), td_errors)
             return episode_return, loss, timestep
 
         # ----- Parallel-env path ----- #
@@ -396,7 +415,9 @@ class AC(OnPolicyAlgorithm):
         # Per-env episode storage
         env_log_probs    = [[] for _ in range(num_agents)]
         env_values       = [[] for _ in range(num_agents)]
+        env_next_values  = [[] for _ in range(num_agents)]
         env_rewards_list = [[] for _ in range(num_agents)]
+        env_dones_list   = [[] for _ in range(num_agents)]
         completed_returns = []
         completed_lengths = []
         total_loss = 0.0
@@ -418,6 +439,10 @@ class AC(OnPolicyAlgorithm):
             if isinstance(next_obs, dict): next_obs = next_obs["policy"]
             dones = terminated | truncated  # (N,)
 
+            # V(s_{t+1}) for TD error (bootstrapping)
+            with torch.no_grad():
+                next_value = self.policy.evaluate(next_obs)  # (N, 1)
+
             # Batch CPU transfer once
             done_cpu = dones.cpu().numpy()
 
@@ -425,16 +450,20 @@ class AC(OnPolicyAlgorithm):
             for i in range(num_agents):
                 env_log_probs[i].append(log_prob[i])
                 env_values[i].append(value[i].squeeze())
+                env_next_values[i].append(next_value[i].squeeze())
                 env_rewards_list[i].append(reward[i])
+                env_dones_list[i].append(dones[i].float())
 
                 if done_cpu[i]:
-                    # Episode completed for env i
+                    # Episode completed for env i — compute TD errors
                     if len(env_rewards_list[i]) > 1:
-                        rewards_t = torch.stack(env_rewards_list[i])
-                        returns   = self.compute_returns(rewards_t)
-                        lp        = torch.stack(env_log_probs[i])
-                        vals      = torch.stack(env_values[i])
-                        actor_loss, critic_loss = self.calculate_loss(lp, vals, returns)
+                        rewards_t     = torch.stack(env_rewards_list[i])
+                        vals          = torch.stack(env_values[i])
+                        next_vals     = torch.stack(env_next_values[i])
+                        dones_t       = torch.stack(env_dones_list[i])
+                        lp            = torch.stack(env_log_probs[i])
+                        td_errors     = self.compute_td_errors(rewards_t, vals, next_vals, dones_t)
+                        actor_loss, critic_loss = self.calculate_loss(lp, vals, td_errors)
                         loss = actor_loss + self.value_loss_coef * critic_loss
                         total_loss += loss
                         num_updates += 1
@@ -443,7 +472,9 @@ class AC(OnPolicyAlgorithm):
                     # Reset storage for this env (Isaac Lab auto-resets)
                     env_log_probs[i]    = []
                     env_values[i]       = []
+                    env_next_values[i]  = []
                     env_rewards_list[i] = []
+                    env_dones_list[i]   = []
 
             obs = next_obs
 

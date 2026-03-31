@@ -425,6 +425,7 @@ class MC_REINFORCE(BaseAlgorithm):
         # Per-env episode storage
         env_log_probs = [[] for _ in range(num_agents)]
         env_rewards   = [[] for _ in range(num_agents)]
+        env_states    = [[] for _ in range(num_agents)]
         completed_returns = []
         completed_lengths = []
         total_loss = 0.0
@@ -453,13 +454,15 @@ class MC_REINFORCE(BaseAlgorithm):
             for i in range(num_agents):
                 env_log_probs[i].append(log_prob[i])
                 env_rewards[i].append(float(rew_cpu[i]))
+                env_states[i].append(obs_tensor[i])
 
                 if done_cpu[i]:
                     # Episode completed for env i
                     if len(env_rewards[i]) > 1:
                         returns = self.calculate_stepwise_returns(env_rewards[i])
                         lp = torch.stack(env_log_probs[i])
-                        loss = self.calculate_loss(returns, lp)
+                        states = torch.stack(env_states[i])
+                        loss = self.calculate_loss(returns, lp, states)
                         total_loss += loss
                         num_updates += 1
                         completed_returns.append(sum(env_rewards[i]))
@@ -467,6 +470,7 @@ class MC_REINFORCE(BaseAlgorithm):
                     # Reset storage for this env (Isaac Lab auto-resets)
                     env_log_probs[i] = []
                     env_rewards[i]   = []
+                    env_states[i]    = []
 
             obs = next_obs
 

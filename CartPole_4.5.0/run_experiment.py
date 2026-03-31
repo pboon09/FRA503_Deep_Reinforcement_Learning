@@ -138,7 +138,7 @@ def build_agent(algo_name: str, cfg: dict, shared: dict, device: torch.device):
             hidden_dim=ac["hidden_dim"],
             dropout=ac.get("dropout", 0.0),
             learning_rate=ac["learning_rate"],
-            tau=ac["tau"],
+            target_update_freq=ac.get("target_update_freq", 1000),
             initial_epsilon=ac["initial_epsilon"],
             epsilon_decay=ac["epsilon_decay"],
             final_epsilon=ac["final_epsilon"],
@@ -580,6 +580,7 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                                 "actor_loss": loss_info.get("actor_loss", ""),
                                 "critic_loss": loss_info.get("critic_loss", ""),
                                 "entropy": loss_info.get("entropy", ""),
+                                "alpha": loss_info.get("alpha", ""),
                             })
                             loss_update_step += 1
 
@@ -822,7 +823,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg,
                 writer = csv.DictWriter(f, fieldnames=[
                     "episode", "ep_return", "ep_length", "global_step", "epsilon"])
                 writer.writeheader()
-                loss_fields = ["update_step", "actor_loss", "critic_loss", "entropy"]
+                loss_fields = ["update_step", "actor_loss", "critic_loss", "entropy", "alpha"]
                 loss_writer = csv.DictWriter(lf, fieldnames=loss_fields)
                 loss_writer.writeheader()
                 train_algorithm(agent, env, algo_name, algo_cfg, shared,

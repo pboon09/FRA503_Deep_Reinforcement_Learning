@@ -52,6 +52,10 @@ class DQN(OffPolicyAlgorithm):
     """
     Deep Q-Network (DQN) — off-policy, value-based.
 
+    Uses periodic hard target network updates (Mnih et al. 2015):
+    every ``target_update_freq`` gradient steps, the target network
+    weights are copied from the policy network.
+
     Args:
         device: Torch device.
         num_of_action (int): Number of discrete actions.
@@ -60,7 +64,7 @@ class DQN(OffPolicyAlgorithm):
         hidden_dim (int): Hidden layer width.
         dropout (float): Dropout rate.
         learning_rate (float): Adam learning rate.
-        tau (float): Polyak soft-update coefficient for target network.
+        target_update_freq (int): Copy policy → target every N gradient steps.
         initial_epsilon (float): Starting exploration rate.
         epsilon_decay (float): Per-step epsilon decay.
         final_epsilon (float): Minimum exploration rate.
@@ -78,7 +82,7 @@ class DQN(OffPolicyAlgorithm):
             hidden_dim: int = None,
             dropout: float = None,
             learning_rate: float = None,
-            tau: float = None,
+            target_update_freq: int = 1000,
             initial_epsilon: float = None,
             epsilon_decay: float = None,
             final_epsilon: float = None,
@@ -97,11 +101,11 @@ class DQN(OffPolicyAlgorithm):
         self.device         = device
         self.steps_done     = 0
         self.num_of_action  = num_of_action
-        self.tau            = tau
+        self.target_update_freq = target_update_freq
+        self.update_count   = 0
         self.learning_starts = learning_starts
 
         self.optimizer = optim.AdamW(self.policy_net.parameters(), lr=learning_rate, amsgrad=True)
-        pass
         # ====================================== #
 
         super(DQN, self).__init__(
@@ -239,9 +243,11 @@ class DQN(OffPolicyAlgorithm):
         return {"critic_loss": loss.item()}
 
     def update_target_networks(self):
+        """Periodic hard copy: θ⁻ ← θ every target_update_freq gradient steps (Mnih et al. 2015)."""
         # ========= put your code here ========= #
-        for target_param, param in zip(self.target_net.parameters(), self.policy_net.parameters()):
-            target_param.data.copy_(self.tau * param.data + (1.0 - self.tau) * target_param.data)
+        self.update_count += 1
+        if self.update_count % self.target_update_freq == 0:
+            self.target_net.load_state_dict(self.policy_net.state_dict())
         # ====================================== #
 
     def learn(self, env, num_agents: int = 256, max_steps: int = 1000):

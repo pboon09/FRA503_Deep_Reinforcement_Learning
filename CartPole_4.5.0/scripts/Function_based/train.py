@@ -130,7 +130,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # Replay buffer — DQN only
     buffer_size     = None
     batch_size      = None
-    tau             = None      # Polyak soft-update rate for target network
+    target_update_freq = None   # Hard copy target network every N gradient steps (DQN)
 
     # Rollout — PPO only
     num_transitions_per_env = None   # steps collected per env before each update
