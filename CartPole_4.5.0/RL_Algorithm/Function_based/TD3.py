@@ -293,7 +293,7 @@ class TD3(OffPolicyAlgorithm):
         Perform one critic update and (if scheduled) one actor update.
 
         Returns:
-            float | None: Critic loss value, or None if buffer not ready.
+            dict | None: Loss dict, or None if buffer not ready.
         """
         sample = self.generate_sample()
         if sample is None:

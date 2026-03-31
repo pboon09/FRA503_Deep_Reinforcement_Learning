@@ -551,9 +551,11 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                 # SAC: scale gradient steps to compensate for vectorized data collection
                 # effective UTD = gradient_steps / num_envs  (Raffin, 2024)
                 # With 256 envs, 64 steps gives effective UTD ≈ 0.25
+                # Target network updated ONCE per env step (outside inner loop) so
+                # tau=0.005 is applied once, not 64×, keeping the target stable.
                 if step >= getattr(agent, 'learning_starts', 0):
                     for _ in range(64):
-                        loss_info = agent.update_policy()
+                        loss_info = agent.update_policy(update_target=False)
                         if loss_writer is not None and loss_info:
                             loss_writer.writerow({
                                 "update_step": loss_update_step,
@@ -563,6 +565,7 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                                 "alpha": loss_info.get("alpha", ""),
                             })
                             loss_update_step += 1
+                    agent.update_target_networks()  # once per env step, not 64×
 
             elif algo_name == "TD3":
                 a_min, a_max = agent.action_range

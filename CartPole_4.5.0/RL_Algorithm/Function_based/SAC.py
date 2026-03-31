@@ -318,12 +318,19 @@ class SAC(OffPolicyAlgorithm):
         return states, actions, rewards, next_states, dones
         # ====================================== #
 
-    def update_policy(self):
+    def update_policy(self, update_target: bool = True):
         """
         Perform one update step for critics, actor, and temperature.
 
+        Args:
+            update_target (bool): Whether to Polyak-update the critic target network.
+                Set False when calling in a tight inner loop (e.g. 64 gradient steps
+                per env step) and call update_target_networks() once externally after
+                the loop — otherwise tau is applied 64× per env step, making the
+                target track the current network ~55× faster than intended.
+
         Returns:
-            float | None: Critic loss, or None if buffer not ready.
+            dict | None: Loss dict, or None if buffer not ready.
         """
         sample = self.generate_sample()
         if sample is None:
@@ -365,7 +372,8 @@ class SAC(OffPolicyAlgorithm):
 
         self.alpha = self.log_alpha.exp().item()
 
-        self.update_target_networks()
+        if update_target:
+            self.update_target_networks()
 
         return {
             "critic_loss": critic_loss.item(),
