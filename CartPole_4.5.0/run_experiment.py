@@ -556,17 +556,18 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                 if step >= getattr(agent, 'learning_starts', 0):
                     for _ in range(64):
                         loss_info = agent.update_policy(update_target=False, update_alpha=False)
-                        if loss_writer is not None and loss_info:
-                            loss_writer.writerow({
-                                "update_step": loss_update_step,
-                                "actor_loss": loss_info.get("actor_loss", ""),
-                                "critic_loss": loss_info.get("critic_loss", ""),
-                                "entropy": loss_info.get("entropy", ""),
-                                "alpha": loss_info.get("alpha", ""),
-                            })
-                            loss_update_step += 1
                     agent.update_target_networks()  # once per env step, not 64×
                     agent.update_alpha_once()        # once per env step, not 64×
+                    # Log once per env step (last gradient step's info)
+                    if loss_writer is not None and loss_info:
+                        loss_writer.writerow({
+                            "update_step": loss_update_step,
+                            "actor_loss": loss_info.get("actor_loss", ""),
+                            "critic_loss": loss_info.get("critic_loss", ""),
+                            "entropy": loss_info.get("entropy", ""),
+                            "alpha": loss_info.get("alpha", ""),
+                        })
+                        loss_update_step += 1
 
             elif algo_name == "TD3":
                 a_min, a_max = agent.action_range
@@ -581,14 +582,15 @@ def train_algorithm(agent, env, algo_name, algo_cfg, shared_cfg, n_episodes_unus
                 if step >= agent.learning_starts:
                     for _ in range(64):
                         loss_info = agent.update_policy()
-                        if loss_writer is not None and loss_info:
-                            loss_writer.writerow({
-                                "update_step": loss_update_step,
-                                "actor_loss": loss_info.get("actor_loss", ""),
-                                "critic_loss": loss_info.get("critic_loss", ""),
-                                "entropy": "",
-                            })
-                            loss_update_step += 1
+                    # Log once per env step (last gradient step's info)
+                    if loss_writer is not None and loss_info:
+                        loss_writer.writerow({
+                            "update_step": loss_update_step,
+                            "actor_loss": loss_info.get("actor_loss", ""),
+                            "critic_loss": loss_info.get("critic_loss", ""),
+                            "entropy": "",
+                        })
+                        loss_update_step += 1
 
             # --- Track completed episodes ---
             ep_returns += reward
