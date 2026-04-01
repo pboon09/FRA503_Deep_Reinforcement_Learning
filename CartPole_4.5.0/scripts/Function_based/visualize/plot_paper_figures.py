@@ -283,31 +283,35 @@ def fig4_policy_value_surfaces(model_dir, fig_dir):
         print("  [WARN] No models for fig4")
         return None
 
-    fig, axes = plt.subplots(2, len(available), figsize=(5 * len(available), 8),
+    # 1x4 layout: PPO policy, PPO value, TD3 policy, TD3 value
+    ncols = len(available) * 2
+    fig, axes = plt.subplots(1, ncols, figsize=(5 * ncols, 4.5),
                              subplot_kw={"projection": "3d"})
-    if len(available) == 1:
-        axes = axes.reshape(2, 1)
+    if ncols == 2:
+        axes = [axes[0], axes[1]]
 
-    fig.suptitle(r"Policy and Value Surfaces (cart_pos=0, cart_vel=0, varying $\theta$ and $\dot{\theta}$)",
-                 fontsize=13, y=0.98)
+    fig.suptitle(r"Policy and Value Surfaces (cart_pos=0, cart_vel=0)", fontsize=13, y=1.0)
 
-    for col, algo in enumerate(available):
+    idx = 0
+    for algo in available:
         pm, vm = surfaces[algo]
-        ax_p = axes[0, col]
+        ax_p = axes[idx]
         ax_p.plot_surface(TH, TD, pm, cmap="RdBu_r", alpha=0.85, edgecolor="none")
-        ax_p.set_xlabel(r"$\theta$", fontsize=9)
-        ax_p.set_ylabel(r"$\dot{\theta}$", fontsize=9)
-        ax_p.set_zlabel("Action (m/s)", fontsize=9)
-        ax_p.set_title(f"{algo}: Policy Surface", fontsize=11)
+        ax_p.set_xlabel(r"$\theta$", fontsize=8)
+        ax_p.set_ylabel(r"$\dot{\theta}$", fontsize=8)
+        ax_p.set_zlabel("Action (m/s)", fontsize=8)
+        ax_p.set_title(f"{algo}: Policy", fontsize=10)
+        idx += 1
 
-        ax_v = axes[1, col]
+        ax_v = axes[idx]
         ax_v.plot_surface(TH, TD, vm, cmap="viridis", alpha=0.85, edgecolor="none")
-        ax_v.set_xlabel(r"$\theta$", fontsize=9)
-        ax_v.set_ylabel(r"$\dot{\theta}$", fontsize=9)
-        ax_v.set_zlabel("V(s)", fontsize=9)
-        ax_v.set_title(f"{algo}: Value Surface", fontsize=11)
+        ax_v.set_xlabel(r"$\theta$", fontsize=8)
+        ax_v.set_ylabel(r"$\dot{\theta}$", fontsize=8)
+        ax_v.set_zlabel("V(s)", fontsize=8)
+        ax_v.set_title(f"{algo}: Value", fontsize=10)
+        idx += 1
 
-    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
     path = os.path.join(fig_dir, "fig4_policy_value_surfaces.png")
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
