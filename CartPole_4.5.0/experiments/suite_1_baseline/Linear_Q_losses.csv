@@ -1,1 +1,1 @@
-update_step,actor_loss,critic_loss,entropy
+update_step,actor_loss,critic_loss,entropy,alpha
