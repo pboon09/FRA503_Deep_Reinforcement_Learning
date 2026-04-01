@@ -38,16 +38,16 @@ LABELS = {
     "AC": "Actor-Critic", "A2C": "A2C", "PPO": "PPO", "SAC": "SAC", "TD3": "TD3",
 }
 
-# Distinct, colorblind-friendly palette
+# Bold, high-contrast palette for both panels
 COLORS = {
     "Linear_Q":     "#1f77b4",   # blue
     "DQN":          "#ff7f0e",   # orange
     "MC_REINFORCE": "#2ca02c",   # green
     "AC":           "#d62728",   # red
-    "A2C":          "#9467bd",   # purple
-    "PPO":          "#17becf",   # teal-cyan
-    "SAC":          "#e377c2",   # pink
-    "TD3":          "#8c564b",   # brown
+    "A2C":          "#e6550d",   # dark orange
+    "PPO":          "#1a9850",   # dark green
+    "SAC":          "#7570b3",   # indigo
+    "TD3":          "#e7298a",   # magenta
 }
 
 LEFT_GROUP = ["Linear_Q", "DQN", "MC_REINFORCE", "AC"]
@@ -104,16 +104,17 @@ def fig1_learning_curves(train_data, fig_dir):
             if algo not in train_data:
                 continue
             df = train_data[algo]
-            gstep = df["global_step"].values
+            batch_step = df["global_step"].values / BATCH_SIZE
             ret = df["ep_return"].values
             mean, std = _rolling(ret)
             c = COLORS[algo]
-            ax.plot(gstep, mean, color=c, linewidth=1.5, label=LABELS[algo])
-            ax.fill_between(gstep, mean - std, mean + std, alpha=0.15, color=c)
+            ax.plot(batch_step, mean, color=c, linewidth=1.5, label=LABELS[algo])
+            ax.fill_between(batch_step, mean - std, mean + std, alpha=0.15, color=c)
 
-        ax.set_xlabel("Environment Step")
+        ax.set_xlabel("Batch Step (x256 envs)")
         ax.set_ylabel("Episode Return")
         ax.set_title(title)
+        ax.set_xlim(0, 20000)
         ax.set_ylim(-50, 1100)
         ax.legend(fontsize=9, loc="center right")
         ax.grid(True, alpha=0.2)
@@ -135,24 +136,23 @@ def fig2_convergence_speed(train_data, fig_dir):
             continue
         df = train_data[algo]
         ret = df["ep_return"].values
-        gstep = df["global_step"].values
+        batch_step = df["global_step"].values / BATCH_SIZE
         mean, _ = _rolling(ret)
         found = None
         for i in range(len(mean)):
             if mean[i] >= CONVERGENCE_THRESHOLD:
-                found = int(gstep[i])
+                found = int(batch_step[i])
                 break
         records.append({"algo": algo, "step": found})
 
-    # Sort: converged first (by step), then DNF
     converged = sorted([r for r in records if r["step"] is not None], key=lambda r: r["step"])
     dnf = [r for r in records if r["step"] is None]
     ordered = converged + dnf
-    max_step = max((r["step"] for r in converged), default=5_000_000)
+    max_step = 20000
 
     fig, ax = plt.subplots(figsize=(8, 3.5), constrained_layout=True)
     y_pos = range(len(ordered))
-    vals = [r["step"] if r["step"] else int(max_step * 1.1) for r in ordered]
+    vals = [r["step"] if r["step"] else max_step for r in ordered]
     bar_colors = [COLORS[r["algo"]] for r in ordered]
 
     ax.barh(y_pos, vals, color=bar_colors, height=0.6)
@@ -160,13 +160,14 @@ def fig2_convergence_speed(train_data, fig_dir):
         if r["step"]:
             ax.text(r["step"] + max_step * 0.02, i, f'{r["step"]:,}', va="center", fontsize=8)
         else:
-            ax.text(max_step * 0.55, i, "DNF", va="center", ha="center",
+            ax.text(max_step * 0.5, i, "DNF", va="center", ha="center",
                     fontsize=9, fontweight="bold", color="white")
 
     ax.set_yticks(y_pos)
     ax.set_yticklabels([LABELS[r["algo"]] for r in ordered], fontsize=9)
-    ax.set_xlabel("Environment Step to Reach 900 (rolling-50)")
+    ax.set_xlabel("Batch Step to Reach 900 (rolling-50)")
     ax.set_title("Convergence Speed")
+    ax.set_xlim(0, max_step)
     ax.invert_yaxis()
     ax.grid(True, alpha=0.2, axis="x")
 
@@ -325,21 +326,19 @@ def fig5_action_traces(traj_data, fig_dir):
     dqn_ep = _pick_ep0(traj_data["DQN"])
     ppo_ep = _pick_ep0(traj_data["PPO"])
 
-    fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True, constrained_layout=True)
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6), sharex=True, constrained_layout=True)
 
-    # DQN action
-    axes[0].plot(dqn_ep["step"], dqn_ep["action"], color=COLORS["DQN"], linewidth=0.8)
-    axes[0].set_ylabel("Velocity (m/s)")
-    axes[0].set_title("DQN Action Trace (Discrete)")
-    axes[0].grid(True, alpha=0.3)
+    # Top: Action trace comparison (both on same plot)
+    ax1.plot(dqn_ep["step"], dqn_ep["action"], color=COLORS["DQN"],
+             linewidth=0.6, alpha=0.8, label="DQN (discrete)")
+    ax1.plot(ppo_ep["step"], ppo_ep["action"], color=COLORS["PPO"],
+             linewidth=1.2, label="PPO (continuous)")
+    ax1.set_ylabel("Velocity (m/s)")
+    ax1.set_title("Action Trace Comparison")
+    ax1.legend(fontsize=9)
+    ax1.grid(True, alpha=0.3)
 
-    # PPO action
-    axes[1].plot(ppo_ep["step"], ppo_ep["action"], color=COLORS["PPO"], linewidth=0.8)
-    axes[1].set_ylabel("Velocity (m/s)")
-    axes[1].set_title("PPO Action Trace (Continuous)")
-    axes[1].grid(True, alpha=0.3)
-
-    # Pole angle overlay
+    # Bottom: Pole angle comparison
     def _rms(arr, n=500):
         tail = arr[-n:] if len(arr) >= n else arr
         return np.sqrt(np.mean(tail ** 2))
@@ -347,15 +346,15 @@ def fig5_action_traces(traj_data, fig_dir):
     rms_dqn = _rms(dqn_ep["pole_angle"].values)
     rms_ppo = _rms(ppo_ep["pole_angle"].values)
 
-    axes[2].plot(dqn_ep["step"], dqn_ep["pole_angle"], color=COLORS["DQN"],
-                 linewidth=1.2, label=f"DQN (RMS={rms_dqn:.4f})")
-    axes[2].plot(ppo_ep["step"], ppo_ep["pole_angle"], color=COLORS["PPO"],
-                 linewidth=1.2, linestyle="--", label=f"PPO (RMS={rms_ppo:.4f})")
-    axes[2].set_ylabel(r"$\theta$ (rad)")
-    axes[2].set_xlabel("Timestep")
-    axes[2].set_title("Pole Angle Comparison")
-    axes[2].legend(fontsize=9)
-    axes[2].grid(True, alpha=0.3)
+    ax2.plot(dqn_ep["step"], dqn_ep["pole_angle"], color=COLORS["DQN"],
+             linewidth=1.2, label=f"DQN (RMS={rms_dqn:.4f})")
+    ax2.plot(ppo_ep["step"], ppo_ep["pole_angle"], color=COLORS["PPO"],
+             linewidth=1.2, linestyle="--", label=f"PPO (RMS={rms_ppo:.4f})")
+    ax2.set_ylabel(r"$\theta$ (rad)")
+    ax2.set_xlabel("Timestep")
+    ax2.set_title("Pole Angle Comparison")
+    ax2.legend(fontsize=9)
+    ax2.grid(True, alpha=0.3)
 
     path = os.path.join(fig_dir, "fig5_action_traces.png")
     fig.savefig(path, bbox_inches="tight")
@@ -377,15 +376,16 @@ def fig6_reinforce_variance(train_data, fig_dir):
         if algo not in train_data:
             continue
         df = train_data[algo]
-        gstep = df["global_step"].values
+        batch_step = df["global_step"].values / BATCH_SIZE
         ret = df["ep_return"].values
         mean, std = _rolling(ret)
-        ax.plot(gstep, mean, color=color, linewidth=2, label=LABELS[algo])
-        ax.fill_between(gstep, mean - std, mean + std, alpha=0.15, color=color)
+        ax.plot(batch_step, mean, color=color, linewidth=2, label=LABELS[algo])
+        ax.fill_between(batch_step, mean - std, mean + std, alpha=0.15, color=color)
 
-    ax.set_xlabel("Environment Step")
+    ax.set_xlabel("Batch Step (x256 envs)")
     ax.set_ylabel("Episode Return")
     ax.set_title("REINFORCE vs PPO: Training Instability")
+    ax.set_xlim(0, 20000)
     ax.set_ylim(-50, 1100)
     ax.legend(fontsize=10)
     ax.grid(True, alpha=0.2)
