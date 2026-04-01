@@ -38,16 +38,18 @@ LABELS = {
     "AC": "Actor-Critic", "A2C": "A2C", "PPO": "PPO", "SAC": "SAC", "TD3": "TD3",
 }
 
-# Bold, high-contrast palette for both panels
+# Tableau 10 — 8 maximally distinct colors, split across panels
+# Left panel (value-based): blue, orange, green, red
+# Right panel (actor-critic): purple, brown, pink, olive
 COLORS = {
-    "Linear_Q":     "#1f77b4",   # blue
-    "DQN":          "#ff7f0e",   # orange
-    "MC_REINFORCE": "#2ca02c",   # green
-    "AC":           "#d62728",   # red
-    "A2C":          "#e6550d",   # dark orange
-    "PPO":          "#1a9850",   # dark green
-    "SAC":          "#7570b3",   # indigo
-    "TD3":          "#e7298a",   # magenta
+    "Linear_Q":     "#4e79a7",   # steel blue
+    "DQN":          "#f28e2b",   # vivid orange
+    "MC_REINFORCE": "#59a14f",   # green
+    "AC":           "#e15759",   # coral red
+    "A2C":          "#7f58af",   # purple
+    "PPO":          "#64c5eb",   # sky blue
+    "SAC":          "#e84d8a",   # pink
+    "TD3":          "#feb326",   # golden yellow
 }
 
 LEFT_GROUP = ["Linear_Q", "DQN", "MC_REINFORCE", "AC"]
@@ -111,7 +113,7 @@ def fig1_learning_curves(train_data, fig_dir):
             ax.plot(batch_step, mean, color=c, linewidth=1.5, label=LABELS[algo])
             ax.fill_between(batch_step, mean - std, mean + std, alpha=0.15, color=c)
 
-        ax.set_xlabel("Batch Step (x256 envs)")
+        ax.set_xlabel("Batch Step")
         ax.set_ylabel("Episode Return")
         ax.set_title(title)
         ax.set_xlim(0, 20000)
@@ -349,7 +351,7 @@ def fig5_action_traces(traj_data, fig_dir):
     ax2.plot(dqn_ep["step"], dqn_ep["pole_angle"], color=COLORS["DQN"],
              linewidth=1.2, label=f"DQN (RMS={rms_dqn:.4f})")
     ax2.plot(ppo_ep["step"], ppo_ep["pole_angle"], color=COLORS["PPO"],
-             linewidth=1.2, linestyle="--", label=f"PPO (RMS={rms_ppo:.4f})")
+             linewidth=1.2, label=f"PPO (RMS={rms_ppo:.4f})")
     ax2.set_ylabel(r"$\theta$ (rad)")
     ax2.set_xlabel("Timestep")
     ax2.set_title("Pole Angle Comparison")
@@ -382,7 +384,7 @@ def fig6_reinforce_variance(train_data, fig_dir):
         ax.plot(batch_step, mean, color=color, linewidth=2, label=LABELS[algo])
         ax.fill_between(batch_step, mean - std, mean + std, alpha=0.15, color=color)
 
-    ax.set_xlabel("Batch Step (x256 envs)")
+    ax.set_xlabel("Batch Step")
     ax.set_ylabel("Episode Return")
     ax.set_title("REINFORCE vs PPO: Training Instability")
     ax.set_xlim(0, 20000)
